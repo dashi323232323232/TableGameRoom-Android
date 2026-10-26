@@ -1,0 +1,29 @@
+# ---- Unity 生成物 ----
+TableGameRoomMobile/Library/
+TableGameRoomMobile/Temp/
+TableGameRoomMobile/Obj/
+TableGameRoomMobile/Build/
+TableGameRoomMobile/Builds/
+TableGameRoomMobile/Logs/
+TableGameRoomMobile/UserSettings/
+TableGameRoomMobile/*.csproj
+TableGameRoomMobile/*.sln
+TableGameRoomMobile/ProjectSettings/ProjectSettings.asset.bak
+
+# ---- 构建产物 ----
+*.apk
+*.aab
+*.zip
+*.keystore
+*.jks
+
+# ---- 临时文件 ----
+*.log
+*.tmp
+*.bak
+_*.png
+
+# ---- 系统 ----
+Thumbs.db
+desktop.ini
+.DS_Store
