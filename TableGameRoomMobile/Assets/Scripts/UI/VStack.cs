@@ -223,6 +223,72 @@ namespace TableGameRoom.Mobile.UI
         }
 
         /// <summary>
+        /// 卡片网格：每行放 columns 个卡片，等宽等高。
+        ///
+        /// 用于大厅的游戏列表 —— 两列布局能让 5 个游戏一屏显示完，不需要滚动。
+        /// </summary>
+        /// <param name="items">每项是一个构建回调，参数是卡片内部容器</param>
+        /// <param name="columns">每行几个</param>
+        /// <param name="cardHeight">每个卡片的固定高度</param>
+        /// <param name="gap">卡片间距</param>
+        public void CardGrid(
+            IList<Action<RectTransform>> items,
+            int columns,
+            float cardHeight,
+            float gap = 14f,
+            Color? fill = null,
+            Color? border = null,
+            float innerPadding = 20f)
+        {
+            if (items == null || items.Count == 0) return;
+
+            if (_any) _y -= _gap;
+            _any = true;
+
+            var totalWidth = Width;
+            var rows = Mathf.CeilToInt(items.Count / (float)columns);
+            var cardWidth = (totalWidth - gap * (columns - 1)) / columns;
+            var totalHeight = rows * cardHeight + (rows - 1) * gap;
+
+            // 容器
+            var gridGo = new GameObject("CardGrid", typeof(RectTransform));
+            gridGo.transform.SetParent(_host, false);
+            var gridRect = (RectTransform)gridGo.transform;
+
+            gridRect.anchorMin = new Vector2(0f, 1f);
+            gridRect.anchorMax = new Vector2(0f, 1f);
+            gridRect.pivot = new Vector2(0f, 1f);
+            gridRect.anchoredPosition = new Vector2(_padL, _y);
+            gridRect.sizeDelta = new Vector2(totalWidth, totalHeight);
+
+            for (var i = 0; i < items.Count; i++)
+            {
+                var row = i / columns;
+                var col = i % columns;
+
+                var card = UiFactory.Card(gridRect, fill ?? Theme.Panel, border ?? Theme.PanelBorder);
+                var cardRect = card.rectTransform;
+
+                cardRect.anchorMin = cardRect.anchorMax = new Vector2(0f, 1f);
+                cardRect.pivot = new Vector2(0f, 1f);
+                cardRect.anchoredPosition = new Vector2(
+                    col * (cardWidth + gap),
+                    -(row * (cardHeight + gap)));
+                cardRect.sizeDelta = new Vector2(cardWidth, cardHeight);
+
+                // 内部容器
+                var innerGo = new GameObject("Inner", typeof(RectTransform));
+                innerGo.transform.SetParent(cardRect, false);
+                var innerRect = (RectTransform)innerGo.transform;
+                UiFactory.Fill(innerRect, innerPadding, innerPadding, innerPadding, innerPadding);
+
+                items[i]?.Invoke(innerRect);
+            }
+
+            _y -= totalHeight;
+        }
+
+        /// <summary>
         /// 固定高度的卡片：内部不做竖直排布，用绝对定位摆放元素。
         /// 适用于牌桌这类需要精确控制布局的区域。
         /// </summary>
@@ -266,8 +332,7 @@ namespace TableGameRoom.Mobile.UI
             Color? border = null,
             float innerPadding = 26f,
             float innerGap = 12f)
-        {
-            return Card(s =>
+        {            return Card(s =>
             {
                 buildInner?.Invoke(s);
                 return 0f;
@@ -323,6 +388,9 @@ namespace TableGameRoom.Mobile.UI
         public void Finish()
         {
             _host.sizeDelta = new Vector2(0f, Height);
+
+            // 显式归零：pivot 在顶部时，anchoredPosition.y = 0 表示内容顶部与视口顶部对齐
+            _host.anchoredPosition = new Vector2(_host.anchoredPosition.x, 0f);
 
             // 内容高度变化后，通知滚动容器重算范围并归位顶部
             var scroller = _host.GetComponentInParent<SimpleScroll>();

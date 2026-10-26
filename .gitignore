@@ -27,3 +27,6 @@ _*.png
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# ---- Unity IL2CPP 构建缓存 ----
+TableGameRoomMobile/.utmp/

@@ -79,8 +79,30 @@ namespace TableGameRoom.Mobile.UI
         {
             if (_content == null || _viewport == null) return;
 
+            // 立即算一次（此时 viewport 可能还是 0，但 content 高度是对的）
+            ApplyRange(resetToTop);
+
+            // 再延迟两帧算一次（等 Canvas 布局完成，viewport 尺寸就绪）
             StopAllCoroutines();
             StartCoroutine(RefreshRoutine(resetToTop));
+        }
+
+        /// <summary>立即应用可滚动范围。</summary>
+        private void ApplyRange(bool resetToTop)
+        {
+            var contentH = _content.rect.height;
+            var viewportH = _viewport.rect.height;
+
+            if (contentH > 1f && viewportH > 1f)
+            {
+                _minY = Mathf.Min(0f, -(contentH - viewportH));
+            }
+
+            if (resetToTop)
+            {
+                _velocity = 0f;
+                _content.anchoredPosition = new Vector2(_content.anchoredPosition.x, 0f);
+            }
         }
 
         private System.Collections.IEnumerator RefreshRoutine(bool resetToTop)

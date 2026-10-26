@@ -60,12 +60,22 @@ namespace TableGameRoom.Mobile
                 new[] { "全部人数", "单人", "双人", "3 人", "4 人以上" },
                 app.People, v => { app.People = v; app.ShowLobby(); });
 
-            // ---------- 游戏卡片 ----------
+            // ---------- 游戏卡片（两列布局，一屏放下） ----------
+            var visible = new List<GameDef>();
             foreach (var g in Games)
             {
-                if (!MatchesFilter(g)) continue;
-                AddGameCard(stack, g);
+                if (MatchesFilter(g)) visible.Add(g);
             }
+
+            var builders = new List<Action<RectTransform>>();
+            foreach (var g in visible)
+            {
+                var game = g;
+                builders.Add(inner => BuildGameCardInner(inner, game));
+            }
+
+            if (builders.Count > 0)
+                stack.CardGrid(builders, 2, 300f, 14f);
 
             stack.Finish();
         }
@@ -121,15 +131,35 @@ namespace TableGameRoom.Mobile
             stack.Grid(buttons, 3, 78f);
         }
 
-        private static void AddGameCard(VStack stack, GameDef g)
+        /// <summary>卡片内部内容（两列网格，宽度受限，字号偏小）。</summary>
+        private static void BuildGameCardInner(RectTransform inner, GameDef g)
         {
-            stack.Card(inner =>
-            {
-                inner.Text($"{g.Emoji}  {g.Name}", Theme.FontTitle, Theme.Ink, bold: true, minHeight: 62f);
-                inner.Text(g.Desc, Theme.FontBody, Theme.Muted);
-                inner.Text($"支持 {g.MinSeats}–{g.MaxSeats} 人", Theme.FontSmall, Theme.Accent);
-                inner.Primary("进入牌桌", () => EnterGame(g));
-            }, Theme.Panel, Theme.PanelBorder);
+            var emoji = UiFactory.Label(inner, g.Emoji, 44, Theme.Ink, TextAnchor.MiddleCenter);
+            UiFactory.TopStretch(emoji.rectTransform, 54f);
+
+            var name = UiFactory.Label(inner, g.Name, Theme.FontHead, Theme.Ink,
+                TextAnchor.MiddleCenter, bold: true);
+            UiFactory.TopStretch(name.rectTransform, 46f, 56f);
+
+            var desc = UiFactory.Label(inner, g.Desc, 19, Theme.Muted, TextAnchor.UpperCenter);
+            var dr = desc.rectTransform;
+            dr.anchorMin = new Vector2(0f, 1f);
+            dr.anchorMax = new Vector2(1f, 1f);
+            dr.pivot = new Vector2(0.5f, 1f);
+            dr.offsetMin = new Vector2(0f, -152f);
+            dr.offsetMax = new Vector2(0f, -104f);
+
+            var seats = UiFactory.Label(inner, $"支持 {g.MinSeats}–{g.MaxSeats} 人",
+                18, Theme.Accent, TextAnchor.MiddleCenter);
+            var sr = seats.rectTransform;
+            sr.anchorMin = new Vector2(0f, 1f);
+            sr.anchorMax = new Vector2(1f, 1f);
+            sr.pivot = new Vector2(0.5f, 1f);
+            sr.offsetMin = new Vector2(0f, -182f);
+            sr.offsetMax = new Vector2(0f, -152f);
+
+            var btn = UiFactory.Primary(inner, "进入", () => EnterGame(g), 24);
+            UiFactory.BottomStretch(btn.GetComponent<RectTransform>(), 74f, 0f);
         }
 
         private static void EnterGame(GameDef g)

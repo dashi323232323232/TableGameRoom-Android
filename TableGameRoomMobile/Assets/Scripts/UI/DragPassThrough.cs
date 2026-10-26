@@ -14,15 +14,20 @@ namespace TableGameRoom.Mobile.UI
     {
         private SimpleScroll _scroll;
 
-        private void Awake()
+        /// <summary>动态查找（不能缓存：Awake 时父级链可能还没建好）。</summary>
+        private SimpleScroll Scroll
         {
-            _scroll = GetComponentInParent<SimpleScroll>();
+            get
+            {
+                if (_scroll == null) _scroll = GetComponentInParent<SimpleScroll>();
+                return _scroll;
+            }
         }
 
-        public void OnBeginDrag(PointerEventData e) => _scroll?.OnBeginDrag(e);
+        public void OnBeginDrag(PointerEventData e) => Scroll?.OnBeginDrag(e);
 
-        public void OnDrag(PointerEventData e) => _scroll?.OnDrag(e);
+        public void OnDrag(PointerEventData e) => Scroll?.OnDrag(e);
 
-        public void OnEndDrag(PointerEventData e) => _scroll?.OnEndDrag(e);
+        public void OnEndDrag(PointerEventData e) => Scroll?.OnEndDrag(e);
     }
 }
