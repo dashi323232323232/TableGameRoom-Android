@@ -105,37 +105,44 @@ try {
         Write-Host "本地精简：$count → $KeepLocal"
 
         $keep = @(git rev-list --reverse HEAD | Select-Object -Last $KeepLocal)
+
+        # 记录每个提交的 subject 和 tree
         $subjects = @()
+        $trees = @()
         foreach ($h in $keep) {
             $s = (git log -1 --format=%s $h)
             if ([string]::IsNullOrWhiteSpace($s)) { $s = "版本 $($h.Substring(0,8))" }
             $subjects += $s
+            $trees += (git rev-parse "$h^{tree}").Trim()
         }
 
+        # 记录 tag → 旧提交
         $tagMap = @{}
         foreach ($t in @(git tag -l)) {
             $th = (git rev-list -n 1 $t)
             if ($keep -contains $th) { $tagMap[$th] = $t }
         }
 
-        git checkout --orphan __rel_tmp $keep[0] --quiet 2>&1 | Out-Null
-        git reset --mixed --quiet
-        git add -A
-        git commit --quiet -m $subjects[0]
-        $new = @((git rev-parse HEAD))
+        $oldHead = (git rev-parse HEAD).Trim()
 
-        for ($i = 1; $i -lt $keep.Count; $i++) {
-            git rm -r --cached --quiet . 2>&1 | Out-Null
-            Get-ChildItem -Force | Where-Object { $_.Name -ne '.git' } |
-                Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-            git checkout $keep[$i] -- . 2>&1 | Out-Null
-            git add -A
-            git commit --quiet -m $subjects[$i]
-            $new += (git rev-parse HEAD)
+        # 用 commit-tree 重建提交链 —— 纯对象操作，完全不动工作区
+        # （旧实现用 checkout --orphan + 删文件，会连带删掉 Library/、Builds/ 等
+        #  未跟踪的构建产物，Unity 项目会整个重建，代价极高）
+        $new = @()
+        for ($i = 0; $i -lt $keep.Count; $i++) {
+            if ($i -eq 0) {
+                $nh = (git commit-tree $trees[$i] -m $subjects[$i]).Trim()
+            }
+            else {
+                $nh = (git commit-tree $trees[$i] -p $new[$i - 1] -m $subjects[$i]).Trim()
+            }
+            $new += $nh
         }
 
-        git checkout -B $branch --quiet
-        git branch -D __rel_tmp --quiet 2>&1 | Out-Null
+        # 移动分支指针（不动工作区、不动索引）
+        git update-ref "refs/heads/$branch" $new[-1] $oldHead
+        # 只同步索引到新 HEAD，工作区文件保持原样
+        git reset --mixed --quiet
 
         foreach ($t in @(git tag -l)) { git tag -d $t | Out-Null }
         for ($i = 0; $i -lt $new.Count; $i++) {
@@ -144,7 +151,7 @@ try {
 
         git reflog expire --expire=now --all 2>&1 | Out-Null
         git gc --prune=now --quiet 2>&1 | Out-Null
-        Write-Host "✓ 本地已精简"
+        Write-Host "✓ 本地已精简（工作区文件未受影响）"
     }
 
     # ---------- 5. 汇总 ----------
