@@ -109,7 +109,7 @@ Unity.exe -batchmode -quit -nographics \
 
 1. 下载 Release 里的 `TableGameRoom.apk`
 2. 拖进模拟器（MuMu / 雷电 / 夜神）或传到手机安装
-3. 包名 `com.table.gameroom`，最低支持 Android 6.0
+3. 包名 `com.table.gameroom`，最低支持 Android 7.0（API 24），目标 API 34
 
 ## 版本
 
