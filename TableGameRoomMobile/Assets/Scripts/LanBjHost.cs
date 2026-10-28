@@ -121,7 +121,20 @@ namespace TableGameRoom.Mobile
             var playingIds = room.Members.Where(m => m.Playing)
                 .Select(m => m.PlayerId).ToHashSet();
 
-            _state.Players.RemoveAll(p => !playingIds.Contains(p.PlayerId) || p.Bet <= 0);
+            _state.Players.RemoveAll(p => !playingIds.Contains(p.PlayerId));
+
+            // 为还没下注的参战玩家补上条目（默认底注），
+            // 否则没点"下注"的玩家会被排除出牌局，看起来像"观战中"
+            foreach (var pid in playingIds)
+            {
+                if (_state.Players.All(p => p.PlayerId != pid))
+                    _state.Players.Add(new BjPlayerModel { PlayerId = pid, Bet = 100 });
+            }
+
+            foreach (var p in _state.Players)
+            {
+                if (p.Bet <= 0) p.Bet = 100;
+            }
 
             // AI 补位
             _state.Players.RemoveAll(p => p.PlayerId.StartsWith("ai-"));
