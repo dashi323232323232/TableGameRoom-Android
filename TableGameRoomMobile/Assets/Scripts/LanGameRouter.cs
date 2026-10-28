@@ -11,7 +11,7 @@ namespace TableGameRoom.Mobile
     /// <summary>
     /// 联机对局路由 —— 决定「开始游戏」后进入哪个页面，并把游戏消息分发过去。
     ///
-    /// 主机端：跑 LanBjHost 计算规则，广播状态
+    /// 主机端：跑对应的 Lan*Host 计算规则，广播状态
     /// 客户端：只接收状态并渲染
     /// </summary>
     public sealed class LanGameRouter
@@ -22,9 +22,13 @@ namespace TableGameRoom.Mobile
         private readonly LanSession _session = LanSession.Instance;
 
         private LanBjHost _bjHost;
-        private LanBlackjackPage _bjPage;
+        private LanPokerHost _pokerHost;
+        private LanThreeHost _threeHost;
+        private LanLiarHost _liarHost;
 
-        public MonoBehaviour CurrentPage { get; private set; }
+        private MonoBehaviour _page;
+
+        public MonoBehaviour CurrentPage => _page;
         public string CurrentGameKey { get; private set; } = "";
 
         private bool _initialized;
@@ -49,8 +53,13 @@ namespace TableGameRoom.Mobile
                 return;
             }
 
-            // 房间进入 playing 且还没进对局页 → 自动进入
-            if (room.State == "playing" && CurrentPage == null)
+            // 换了游戏 → 关掉旧对局页，重新进新游戏的页面
+            if (_page != null && CurrentGameKey != room.GameKey)
+            {
+                LeaveGame();
+            }
+
+            if (room.State == "playing" && _page == null)
                 EnterGame(room);
         }
 
@@ -63,8 +72,21 @@ namespace TableGameRoom.Mobile
                 HandleHostAction(msg);
 
             // 状态广播 → 更新界面
-            if (msg.Type == "bj_state")
-                _bjPage?.ApplyState(msg);
+            switch (msg.Type)
+            {
+                case "bj_state":
+                    (_page as LanBlackjackPage)?.ApplyState(msg);
+                    break;
+                case "poker_state":
+                    (_page as LanPokerPage)?.ApplyState(msg);
+                    break;
+                case "three_state":
+                    (_page as LanThreePage)?.ApplyState(msg);
+                    break;
+                case "liar_state":
+                    (_page as LanLiarPage)?.ApplyState(msg);
+                    break;
+            }
         }
 
         private static bool IsGameAction(string type)
@@ -78,6 +100,20 @@ namespace TableGameRoom.Mobile
                 case "bj_stand":
                 case "bj_double":
                 case "bj_reset":
+                case "poker_start":
+                case "poker_call":
+                case "poker_raise":
+                case "poker_fold":
+                case "three_start":
+                case "three_see":
+                case "three_call":
+                case "three_raise":
+                case "three_fold":
+                case "three_showdown":
+                case "liar_start":
+                case "liar_play":
+                case "liar_challenge":
+                case "liar_pass":
                     return true;
                 default:
                     return false;
@@ -91,6 +127,8 @@ namespace TableGameRoom.Mobile
             var room = _session.CurrentRoom;
             if (room == null) return;
 
+            var playerId = msg.PlayerId ?? _session.MyId;
+
             if (msg.Type == "start_game")
             {
                 CurrentGameKey = room.GameKey;
@@ -101,18 +139,40 @@ namespace TableGameRoom.Mobile
                         _bjHost = new LanBjHost(_session);
                         _bjHost.Handle(_session.MyId, msg);
                         break;
-
-                    default:
-                        Debug.Log($"[LanGameRouter] {room.GameKey} 联机逻辑尚未实现");
+                    case "poker":
+                        _pokerHost = new LanPokerHost(_session);
+                        _pokerHost.Handle(_session.MyId, msg);
+                        break;
+                    case "three":
+                        _threeHost = new LanThreeHost(_session);
+                        _threeHost.Handle(_session.MyId, msg);
+                        break;
+                    case "liar":
+                        _liarHost = new LanLiarHost(_session);
+                        _liarHost.Handle(_session.MyId, msg);
                         break;
                 }
                 return;
             }
 
-            if (room.GameKey == "blackjack")
+            switch (room.GameKey)
             {
-                _bjHost ??= new LanBjHost(_session);
-                _bjHost.Handle(msg.PlayerId ?? _session.MyId, msg);
+                case "blackjack":
+                    _bjHost ??= new LanBjHost(_session);
+                    _bjHost.Handle(playerId, msg);
+                    break;
+                case "poker":
+                    _pokerHost ??= new LanPokerHost(_session);
+                    _pokerHost.Handle(playerId, msg);
+                    break;
+                case "three":
+                    _threeHost ??= new LanThreeHost(_session);
+                    _threeHost.Handle(playerId, msg);
+                    break;
+                case "liar":
+                    _liarHost ??= new LanLiarHost(_session);
+                    _liarHost.Handle(playerId, msg);
+                    break;
             }
         }
 
@@ -120,7 +180,7 @@ namespace TableGameRoom.Mobile
 
         public void EnterGame(RoomInfo room)
         {
-            if (CurrentPage != null) return;
+            if (_page != null) return;
 
             var app = App.Instance;
             CurrentGameKey = room.GameKey;
@@ -129,23 +189,40 @@ namespace TableGameRoom.Mobile
             {
                 case "blackjack":
                     app.ShowPage("lan-bj", content =>
-                    {
-                        _bjPage = LanBlackjackPage.Show(content, room, _session.MyId);
-                        CurrentPage = _bjPage;
-                    });
+                        _page = LanBlackjackPage.Show(content, room, _session.MyId));
                     break;
 
-                default:
-                    app.Msg($"{LanPage.GameName(room.GameKey)} 联机对局开发中");
+                case "poker":
+                    app.ShowPage("lan-poker", content =>
+                        _page = LanPokerPage.Show(content, room, _session.MyId));
+                    break;
+
+                case "three":
+                    app.ShowPage("lan-three", content =>
+                        _page = LanThreePage.Show(content, room, _session.MyId));
+                    break;
+
+                case "liar":
+                    app.ShowPage("lan-liar", content =>
+                        _page = LanLiarPage.Show(content, room, _session.MyId));
                     break;
             }
         }
 
         public void LeaveGame()
         {
-            CurrentPage = null;
-            _bjPage = null;
+            // 真正销毁旧对局页，否则它会一直挂在 ScrollRoot 下
+            if (_page != null)
+            {
+                UnityEngine.Object.Destroy(_page.gameObject);
+            }
+
+            _page = null;
             CurrentGameKey = "";
+            _bjHost = null;
+            _pokerHost = null;
+            _threeHost = null;
+            _liarHost = null;
         }
     }
 }

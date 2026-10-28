@@ -234,14 +234,24 @@ namespace TableGameRoom.Mobile
                 }
             }
 
-            stack.Head("创建房间");
-            var createBtns = new List<Button>();
-            foreach (var key in new[] { "blackjack", "poker", "three", "liar" })
+            // 只有会话主机能建房 —— 游戏规则跑在会话主机上，
+            // 如果客户端当房主，没人会去计算牌局（两端都会卡在"等待发牌"）。
+            if (S.IsHost)
             {
-                var k = key;
-                createBtns.Add(UiFactory.Button(_content, GameName(k), () => CreateRoom(k)));
+                stack.Head("创建房间");
+                var createBtns = new List<Button>();
+                foreach (var key in new[] { "blackjack", "poker", "three", "liar" })
+                {
+                    var k = key;
+                    createBtns.Add(UiFactory.Button(_content, GameName(k), () => CreateRoom(k)));
+                }
+                stack.Grid(createBtns, 2, 84f);
             }
-            stack.Grid(createBtns, 2, 84f);
+            else
+            {
+                stack.Text("（只有会话主机能创建房间；加入主机开的房间即可）",
+                    Theme.FontSmall, Theme.Muted);
+            }
 
             stack.Text($"我：{S.MyName}（{S.MyId}）", Theme.FontSmall - 4, Theme.Muted);
         }
@@ -414,6 +424,9 @@ namespace TableGameRoom.Mobile
                 RoomId = S.MyRoomId,
                 GameKey = gameKey
             });
+
+            // 换游戏 = 放弃当前对局，清掉对局页
+            LanGameRouter.Instance.LeaveGame();
         }
 
         private void SetSeats(int seats)

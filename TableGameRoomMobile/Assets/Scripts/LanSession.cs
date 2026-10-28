@@ -261,6 +261,35 @@ namespace TableGameRoom.Mobile
             if (IsHost) Server?.BroadcastSession();
         }
 
+        /// <summary>主机把游戏消息发给指定玩家（含自己）。</summary>
+        public void SendGameToPlayer(string playerId, NetMessage msg)
+        {
+            if (!IsHost) return;
+
+            if (playerId == MyId)
+            {
+                DeliverLocalGameMessage(msg);
+                return;
+            }
+
+            Server?.SendTo(playerId, msg);
+        }
+
+        /// <summary>主机本地直接投递一条游戏消息（不走网络）。</summary>
+        public void DeliverLocalGameMessage(NetMessage msg)
+        {
+            UnityMainThread.Run(() => GameMessage?.Invoke(msg));
+        }
+
+        /// <summary>主机把游戏消息广播给所有人（含自己）。</summary>
+        public void BroadcastGameToAll(NetMessage msg)
+        {
+            if (!IsHost) return;
+
+            Server?.BroadcastRaw(msg);
+            DeliverLocalGameMessage(msg);
+        }
+
         // ==================== 房间操作 ====================
 
         public void CreateRoom(string gameKey)
