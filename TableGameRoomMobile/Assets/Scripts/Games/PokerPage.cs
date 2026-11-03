@@ -518,11 +518,11 @@ namespace TableGameRoom.Mobile.Games
                 potChips.anchoredPosition = Vector2.zero;
             }
 
-            // 公共牌（5 张位置固定）
+            // 公共牌（5 张位置固定）—— 尺寸按桌面版比例缩小，不再压过牌桌
             UiFactory.Clear(_communityHost);
-            LayoutRow(_communityHost, 5, 88f, 8f, i =>
-                i < _community.Count ? MakeCard(_communityHost, _community[i], false, 0.8f)
-                                     : MakePlaceholder(_communityHost, 0.8f));
+            LayoutRow(_communityHost, 5, 62f, 8f, i =>
+                i < _community.Count ? MakeCard(_communityHost, _community[i], false, 0.56f)
+                                     : MakePlaceholder(_communityHost, 0.56f));
 
             // 其他玩家 —— 椭圆环绕（与桌面版 TableRing 同一套归一化坐标）
             UiFactory.Clear(_seatsHost);
@@ -547,7 +547,7 @@ namespace TableGameRoom.Mobile.Games
                         _seatsHost,
                         s.Name, s.Emoji, i,
                         s.Status, s.Committed, s.Folded, isCurrent,
-                        s.Result);
+                        s.Result, s.Hole, hidden: !_showdown);
 
                     var cr = card;
                     cr.anchorMin = cr.anchorMax = new Vector2(0.5f, 0.5f);
@@ -570,8 +570,10 @@ namespace TableGameRoom.Mobile.Games
             else
             {
                 // 整组内容水平居中：头像 + 手牌 + 筹码
-                const float avatarSize = 50f;
-                const float cardW = 72f;
+                // 尺寸按桌面版等比例缩：自己的牌比公共牌略大一点点，但不压牌桌
+                const float avatarSize = 46f;
+                const float cardW = 64f;
+                const float cardH = 90f;
                 const float gap = 5f;
 
                 var cardsW = _player.Count * cardW + (_player.Count - 1) * gap;
@@ -592,11 +594,11 @@ namespace TableGameRoom.Mobile.Games
                 var cardsX = startX + avatarSize + 6f;
                 for (var i = 0; i < _player.Count; i++)
                 {
-                    var card = MakeCard(_playerHost, _player[i], false, 0.65f);
+                    var card = MakeCard(_playerHost, _player[i], false, 0.5f);
                     var crd = card;
                     crd.anchorMin = crd.anchorMax = new Vector2(0.5f, 0.5f);
                     crd.pivot = new Vector2(0f, 0.5f);
-                    crd.sizeDelta = new Vector2(cardW, 100f);
+                    crd.sizeDelta = new Vector2(cardW, cardH);
                     crd.anchoredPosition = new Vector2(cardsX + i * (cardW + gap), 0f);
                 }
 

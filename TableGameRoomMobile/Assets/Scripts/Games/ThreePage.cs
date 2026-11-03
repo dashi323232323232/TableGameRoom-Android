@@ -292,6 +292,10 @@ namespace TableGameRoom.Mobile.Games
                     deck.RemoveAt(deck.Count - 1);
                 }
 
+                // AI 决策引擎从 Profile.Cards 读牌，必须同步一份，
+                // 否则 ThreeScore.Of 会拿到空列表直接越界崩掉。
+                foreach (var c in seat.Cards) seat.Profile.Cards.Add(c);
+
                 _seats.Add(seat);
             }
 
@@ -449,7 +453,6 @@ namespace TableGameRoom.Mobile.Games
                 Showdown();
                 return;
             }
-
             RefreshTable();
             BuildActions();
         }
@@ -539,8 +542,12 @@ namespace TableGameRoom.Mobile.Games
             if (seatCount > 0)
             {
                 var positions = TableRing.ComputerPositions(seatCount);
-                const float tableW = 1000f;
-                const float tableH = 482f;
+
+                // 用容器真实尺寸（不同分辨率下才能对齐椭圆）
+                var tableW = _tableHost.rect.width;
+                var tableH = _tableHost.rect.height;
+                if (tableW <= 1f) tableW = 1000f;
+                if (tableH <= 1f) tableH = 482f;
 
                 for (var i = 0; i < seatCount; i++)
                 {
@@ -551,7 +558,7 @@ namespace TableGameRoom.Mobile.Games
                         _seatsHost,
                         s.Name, s.Emoji, i,
                         s.Status, s.Committed, s.Folded, isCurrent,
-                        s.Result);
+                        s.Result, s.Cards, hidden: !_showdown);
 
                     var cr = card;
                     cr.anchorMin = cr.anchorMax = new Vector2(0.5f, 0.5f);
@@ -581,8 +588,8 @@ namespace TableGameRoom.Mobile.Games
                 avr.anchoredPosition = new Vector2(2f, 0f);
 
                 var show = _playerLooked || _showdown;
-                LayoutRow(_playerHost, _player.Count, 76f, 6f,
-                    i => MakeCard(_playerHost, _player[i], !show, 0.69f));
+                LayoutRow(_playerHost, _player.Count, 56f, 6f,
+                    i => MakeCard(_playerHost, _player[i], !show, 0.5f));
 
                 // 已下注筹码
                 if (_playerCommitted > 0)

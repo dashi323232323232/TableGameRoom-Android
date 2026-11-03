@@ -17,8 +17,8 @@ namespace TableGameRoom.Mobile.UI
         /// <summary>座位卡片的基准宽度（与桌面版一致）。</summary>
         public const float SeatWidth = 132f;
 
-        /// <summary>座位卡片高度（比桌面版略高，因为手机竖屏要给名字留空间）。</summary>
-        public const float SeatHeight = 84f;
+        /// <summary>座位卡片高度（名字 + 底牌 + 状态三行）。</summary>
+        public const float SeatHeight = 100f;
 
         /// <summary>椭圆在容器里的占比（与桌面版一致）。</summary>
         public const float EllipseWidthRatio = 0.78f;

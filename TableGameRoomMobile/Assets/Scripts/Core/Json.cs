@@ -51,6 +51,25 @@ namespace TableGameRoom.Mobile.Core
                 case float f: sb.Append(f.ToString("R", CultureInfo.InvariantCulture)); return;
                 case double d: sb.Append(d.ToString("R", CultureInfo.InvariantCulture)); return;
                 case decimal m: sb.Append(m.ToString(CultureInfo.InvariantCulture)); return;
+
+                // 这些类型如果走下面的反射分支，会把自己的属性无限展开
+                // （DateTime.DayOfWeek → DayOfWeek → ...），最终栈溢出把主线程卡死。
+                // 必须在这里拦下来，按 ISO-8601 字符串写出。
+                case DateTime dt:
+                    WriteString(sb, dt.ToString("o", CultureInfo.InvariantCulture));
+                    return;
+                case DateTimeOffset dto:
+                    WriteString(sb, dto.ToString("o", CultureInfo.InvariantCulture));
+                    return;
+                case TimeSpan ts:
+                    WriteString(sb, ts.ToString("c", CultureInfo.InvariantCulture));
+                    return;
+                case Guid g:
+                    WriteString(sb, g.ToString("D"));
+                    return;
+                case Enum e:
+                    WriteString(sb, e.ToString());
+                    return;
             }
 
             var pretty = indent >= 0;
@@ -347,6 +366,26 @@ namespace TableGameRoom.Mobile.Core
             if (target == typeof(bool)) return Convert.ToBoolean(node, CultureInfo.InvariantCulture);
             if (target == typeof(float)) return Convert.ToSingle(node, CultureInfo.InvariantCulture);
             if (target == typeof(double)) return Convert.ToDouble(node, CultureInfo.InvariantCulture);
+
+            // 与 WriteValue 里的 DateTime 分支配对，否则读回来会变成空结构体。
+            if (target == typeof(DateTime))
+            {
+                if (node is string dts &&
+                    DateTime.TryParse(dts, CultureInfo.InvariantCulture,
+                        DateTimeStyles.RoundtripKind, out var parsedDt))
+                    return parsedDt;
+                return default(DateTime);
+            }
+            if (target == typeof(DateTimeOffset))
+            {
+                if (node is string dtos &&
+                    DateTimeOffset.TryParse(dtos, CultureInfo.InvariantCulture,
+                        DateTimeStyles.RoundtripKind, out var parsedDto))
+                    return parsedDto;
+                return default(DateTimeOffset);
+            }
+            if (target == typeof(Guid) && node is string gs && Guid.TryParse(gs, out var parsedGuid))
+                return parsedGuid;
 
             var underlying = Nullable.GetUnderlyingType(target);
             if (underlying != null) return ConvertTo(node, underlying);

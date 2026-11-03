@@ -19,6 +19,10 @@ namespace TableGameRoom.Mobile
         private const string OutputDir = "Builds";
         private const string ApkName = "TableGameRoom.apk";
 
+        /// <summary>版本号（发布时改这两行）。</summary>
+        public const string AppVersion = "1.28";
+        public const int AppVersionCode = 128;
+
         // 外部工具链路径（安装目录无写权限，工具链放在 D 盘）
         private static string ToolchainRoot =>
             Environment.GetEnvironmentVariable("TABLE_ANDROID_TOOLCHAIN")
@@ -80,6 +84,11 @@ namespace TableGameRoom.Mobile
                 // 最小 API 24 (Android 7.0)，目标 API 34
                 PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel24;
                 PlayerSettings.Android.targetSdkVersion = AndroidSdkVersions.AndroidApiLevel34;
+
+                // 版本号必须在这里设置：直接改 ProjectSettings.asset 会被 Unity 构建时覆盖。
+                PlayerSettings.bundleVersion = AppVersion;
+                PlayerSettings.Android.bundleVersionCode = AppVersionCode;
+                Debug.Log($"[BuildScript] 版本 {AppVersion} ({AppVersionCode})");
 
                 // 图形 API：Vulkan + GLES3
                 PlayerSettings.SetUseDefaultGraphicsAPIs(BuildTarget.Android, false);

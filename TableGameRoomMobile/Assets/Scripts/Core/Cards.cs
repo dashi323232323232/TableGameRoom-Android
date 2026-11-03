@@ -86,6 +86,8 @@ public static class PokerScore
 
     public static long Of(IReadOnlyList<Card> five)
     {
+        if (five == null || five.Count < 5) return 0;
+
         var ranks = five.Select(c => c.Rank).OrderByDescending(x => x).ToArray();
         var flush = five.All(c => c.Suit == five[0].Suit);
         var distinct = ranks.Distinct().ToArray();
@@ -190,6 +192,9 @@ public static class ThreeScore
 
     public static long Of(IReadOnlyList<Card> three)
     {
+        // 防御：不足三张时不能评分（否则下面 three[0] 会越界）。
+        if (three == null || three.Count < 3) return 0;
+
         var ranks = three.Select(c => c.Rank).OrderByDescending(x => x).ToArray();
         var flush = three.All(c => c.Suit == three[0].Suit);
         var distinct = ranks.Distinct().ToArray();
