@@ -1,0 +1,31 @@
+=== 联机协议自检 ===
+  hello → {"Type":"hello","PlayerName":"测试玩家"}
+  ✓ 字段名 PascalCase
+  ✓ null 字段被忽略
+  ✓ 中文不乱码
+  ✓ hello 往返 Type
+  ✓ hello 往返 PlayerName
+  ✓ 解析 Windows welcome.Type
+  ✓ 解析 Windows welcome.PlayerId
+  ✓ 解析 Session 非空
+  ✓ 解析 SessionName
+  ✓ 解析 Port
+  ✓ 解析 Players 数量
+  ✓ 解析 Player.IsSessionHost
+  ✓ 解析 Rooms 数量
+  ✓ 解析 Room.Seats
+  ✓ 解析 Member.Unlimited
+  ✓ 解析 Member.Chips
+  set_chips → {"Type":"set_chips","RoomId":"r1","Data":{"playerId":"abc12345","chips":"-1"}}
+  ✓ Data 往返 playerId
+  ✓ Data 往返 chips
+  ✓ 转义往返
+  ✓ 会话往返 Players
+  ✓ 会话往返 Rooms
+  ✓ 会话往返 GameKey
+  ✓ 会话往返 TierIndex
+  ✓ 会话往返 TurnSeconds
+  ✓ 会话往返 Members
+  ✓ 会话往返 Busted
+  ✓ 会话往返 Playing
+=== 结果：27 通过，0 失败 ===
