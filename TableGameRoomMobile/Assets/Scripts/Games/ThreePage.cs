@@ -57,6 +57,7 @@ namespace TableGameRoom.Mobile.Games
         private RectTransform _potChipsHost;
         private RectTransform _actionHost;
         private RectTransform _setupHost;
+        private RectTransform _tableHost;
 
         /// <summary>当前正在行动的座位名（用于高亮）。</summary>
         private string _currentSeatName = "";
@@ -82,44 +83,57 @@ namespace TableGameRoom.Mobile.Games
 
             stack.Button("← 返回大厅", () => _app.ShowLobby(), 88f);
 
-            // ---------- 牌桌 ----------
-            // 纵向分区（卡片 570 高）：
-            //   0~50    底池金额
-            //   50~92   状态
-            //   92~172  底池筹码堆
-            //   172~400 其他玩家座位行
-            //   400~570 我的头像 + 手牌 + 已下注筹码
+            // ---------- 牌桌（横向椭圆，与桌面版一致） ----------
             stack.FixedCard(inner =>
             {
-                _potText = UiFactory.Label(inner, "底池 $0", Theme.FontTitle, Theme.Ink,
-                    TextAnchor.MiddleCenter, bold: true);
-                UiFactory.TopStretch(_potText.rectTransform, 50f);
-
-                _statusText = UiFactory.Label(inner, "准备开始", Theme.FontBody, Theme.Muted,
+                _statusText = UiFactory.Label(inner, "准备开始", Theme.FontSmall, Theme.Muted,
                     TextAnchor.MiddleCenter);
-                UiFactory.TopStretch(_statusText.rectTransform, 40f, 52f);
+                UiFactory.TopStretch(_statusText.rectTransform, 34f);
 
-                // 底池筹码堆
-                _potChipsHost = UiFactory.Node(inner, "PotChips");
+                // 椭圆桌面 + 座位层
+                _tableHost = UiFactory.Node(inner, "TableArea");
+                var thr = _tableHost;
+                thr.anchorMin = new Vector2(0f, 1f);
+                thr.anchorMax = new Vector2(1f, 1f);
+                thr.pivot = new Vector2(0.5f, 1f);
+                thr.offsetMin = new Vector2(0f, -520f);
+                thr.offsetMax = new Vector2(0f, -38f);
+
+                // 椭圆背景（在座位之下）
+                var tableBg = UiFactory.Node(_tableHost, "TableBg");
+                UiFactory.Fill(tableBg);
+                TableRing.BuildTableBackground(tableBg, 1000f, 482f);
+
+                // 中央：底池金额 + 底池筹码
+                _potText = UiFactory.Label(_tableHost, "底池 $0", Theme.FontSmall, Theme.Muted,
+                    TextAnchor.MiddleCenter, bold: true);
+                var ptr = _potText.rectTransform;
+                ptr.anchorMin = ptr.anchorMax = new Vector2(0.5f, 0.5f);
+                ptr.pivot = new Vector2(0.5f, 0.5f);
+                ptr.sizeDelta = new Vector2(300f, 34f);
+                ptr.anchoredPosition = new Vector2(0f, 34f);
+
+                _potChipsHost = UiFactory.Node(_tableHost, "PotChips");
                 var pcr = _potChipsHost;
-                pcr.anchorMin = new Vector2(0f, 1f);
-                pcr.anchorMax = new Vector2(1f, 1f);
-                pcr.pivot = new Vector2(0.5f, 1f);
-                pcr.offsetMin = new Vector2(0f, -172f);
-                pcr.offsetMax = new Vector2(0f, -96f);
+                pcr.anchorMin = pcr.anchorMax = new Vector2(0.5f, 0.5f);
+                pcr.pivot = new Vector2(0.5f, 0.5f);
+                pcr.sizeDelta = new Vector2(400f, 56f);
+                pcr.anchoredPosition = new Vector2(0f, -22f);
 
-                // 其他玩家座位行（居中锚点）
-                _seatsHost = UiFactory.Node(inner, "Seats");
-                var shr = _seatsHost;
-                shr.anchorMin = new Vector2(0f, 1f);
-                shr.anchorMax = new Vector2(1f, 1f);
-                shr.pivot = new Vector2(0.5f, 0.5f);
-                shr.offsetMin = new Vector2(0f, -400f);
-                shr.offsetMax = new Vector2(0f, -180f);
+                // 座位层
+                _seatsHost = UiFactory.Node(_tableHost, "Seats");
+                UiFactory.Fill(_seatsHost);
 
-                _playerHost = UiFactory.Node(inner, "PlayerCards");
-                UiFactory.BottomStretch(_playerHost, 168f, 6f);
-            }, 570f);
+                // 玩家自己（底部中央）
+                _playerHost = UiFactory.Node(_tableHost, "SelfSeat");
+                var phr = _playerHost;
+                phr.anchorMin = phr.anchorMax = new Vector2(0.5f, 0.5f);
+                phr.pivot = new Vector2(0.5f, 0.5f);
+                phr.sizeDelta = new Vector2(320f, 150f);
+
+                var selfPos = TableRing.ToLocal(TableRing.PlayerPos, 1000f, 482f, 320f, 150f);
+                phr.anchoredPosition = selfPos;
+            }, 540f);
 
             // ---------- 结果 ----------
             _resultText = stack.CenterText("", Theme.FontHead, Theme.Accent, bold: true, height: 54f);
@@ -521,53 +535,63 @@ namespace TableGameRoom.Mobile.Games
 
             UiFactory.Clear(_seatsHost);
             var seatCount = _seats.Count;
-            var geo = SeatGeometry.For(seatCount, _seatsHost.rect.width);
 
-            for (var i = 0; i < seatCount; i++)
+            if (seatCount > 0)
             {
-                var s = _seats[i];
-                var pos = geo.Position(i);
-                var isCurrent = s.Name == _currentSeatName;
+                var positions = TableRing.ComputerPositions(seatCount);
+                const float tableW = 1000f;
+                const float tableH = 482f;
 
-                // 统一用 SeatCard：卡片框 + 竖排（头像 / 名字 / 状态 / 筹码）
-                var card = SeatCard.Create(
-                    _seatsHost, geo,
-                    s.Name, s.Emoji, i, false,
-                    s.Status, s.Committed, s.Folded, isCurrent,
-                    s.Result);
+                for (var i = 0; i < seatCount; i++)
+                {
+                    var s = _seats[i];
+                    var isCurrent = s.Name == _currentSeatName;
 
-                var cr = card;
-                cr.anchorMin = cr.anchorMax = new Vector2(0.5f, 0.5f);
-                cr.pivot = new Vector2(0f, 0.5f);
-                cr.anchoredPosition = pos;
+                    var card = SeatCard.Create(
+                        _seatsHost,
+                        s.Name, s.Emoji, i,
+                        s.Status, s.Committed, s.Folded, isCurrent,
+                        s.Result);
+
+                    var cr = card;
+                    cr.anchorMin = cr.anchorMax = new Vector2(0.5f, 0.5f);
+                    cr.pivot = new Vector2(0.5f, 0.5f);
+
+                    var norm = positions[Mathf.Min(i, positions.Length - 1)];
+                    cr.anchoredPosition = TableRing.ToLocal(norm, tableW, tableH,
+                        SeatCard.Width, TableRing.SeatHeight);
+                }
             }
 
             UiFactory.Clear(_playerHost);
             if (_player.Count == 0)
             {
-                var hint = UiFactory.Label(_playerHost, "等待发牌", Theme.FontBody, Theme.Muted,
+                var hint = UiFactory.Label(_playerHost, "等待发牌", Theme.FontSmall, Theme.Muted,
                     TextAnchor.MiddleCenter);
-                UiFactory.Center(hint.rectTransform, 300f, 60f);
+                UiFactory.Center(hint.rectTransform, 280f, 50f);
             }
             else
             {
-                // 玩家头像（小一号）
+                // 头像（左侧）
                 var avatar = AvatarVisual.Create(_playerHost, "你", _playerEmoji, 0,
-                    isPlayer: true, size: 56f);
+                    isPlayer: true, size: 52f);
                 var avr = avatar;
                 avr.anchorMin = avr.anchorMax = new Vector2(0f, 0.5f);
                 avr.pivot = new Vector2(0f, 0.5f);
-                avr.anchoredPosition = new Vector2(4f, 0f);
+                avr.anchoredPosition = new Vector2(2f, 0f);
 
                 var show = _playerLooked || _showdown;
-                LayoutRow(_playerHost, _player.Count, 88f, 8f,
-                    i => MakeCard(_playerHost, _player[i], !show));
+                LayoutRow(_playerHost, _player.Count, 76f, 6f,
+                    i => MakeCard(_playerHost, _player[i], !show, 0.69f));
 
                 // 已下注筹码
                 if (_playerCommitted > 0)
                 {
-                    var chips = ChipVisual.Create(_playerHost, _playerCommitted, 0.55f);
-                    chips.anchoredPosition = new Vector2(300f, 0f);
+                    var chips = ChipVisual.Create(_playerHost, _playerCommitted, 0.42f);
+                    var crt = chips;
+                    crt.anchorMin = crt.anchorMax = new Vector2(1f, 0.5f);
+                    crt.pivot = new Vector2(1f, 0.5f);
+                    crt.anchoredPosition = new Vector2(-2f, 0f);
                 }
             }
 
