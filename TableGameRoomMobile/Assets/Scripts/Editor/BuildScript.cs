@@ -20,8 +20,8 @@ namespace TableGameRoom.Mobile
         private const string ApkName = "TableGameRoom.apk";
 
         /// <summary>版本号（发布时改这两行）。</summary>
-        public const string AppVersion = "1.28";
-        public const int AppVersionCode = 128;
+        public const string AppVersion = "1.29";
+        public const int AppVersionCode = 129;
 
         // 外部工具链路径（安装目录无写权限，工具链放在 D 盘）
         private static string ToolchainRoot =>
@@ -89,6 +89,9 @@ namespace TableGameRoom.Mobile
                 PlayerSettings.bundleVersion = AppVersion;
                 PlayerSettings.Android.bundleVersionCode = AppVersionCode;
                 Debug.Log($"[BuildScript] 版本 {AppVersion} ({AppVersionCode})");
+
+                // 图标与开屏（同样必须在构建前用 API 设置，改 asset 无效）
+                IconSetup.Apply();
 
                 // 图形 API：Vulkan + GLES3
                 PlayerSettings.SetUseDefaultGraphicsAPIs(BuildTarget.Android, false);
