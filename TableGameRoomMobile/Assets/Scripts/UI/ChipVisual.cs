@@ -32,9 +32,12 @@ namespace TableGameRoom.Mobile.UI
         private const int TexSize = 256;
         private const float ChipW = 224f;   // 贴图内的筹码宽度
         private const float ChipH = 224f;   // 贴图内的筹码高度（俯视圆）
-        private const float StackWidth = 88f;
-        private const float StackHeight = 88f;
-        private const float ChipStepY = 13f; // 每枚往上偏移（俯视堆叠只露边缘）
+
+        // 筹码基准尺寸。之前 88 太宽，三摞叠起来能占掉半个牌桌中央，
+        // 把底池数字和公共牌都压住了。缩到 56，视觉上仍能分辨面额。
+        private const float StackWidth = 56f;
+        private const float StackHeight = 56f;
+        private const float ChipStepY = 8f;  // 每枚往上偏移（俯视堆叠只露边缘）
 
         /// <summary>
         /// 创建一堆筹码。amount 为 0 时返回空容器。
@@ -58,12 +61,12 @@ namespace TableGameRoom.Mobile.UI
                 return rt;
             }
 
-            // 选基准面额：从大到小找第一个「枚数合理」的（≤30 枚，即 3 摞 × 10）
+            // 选基准面额：从大到小找第一个「枚数合理」的
             var baseValue = 1;
             foreach (var (value, _) in Denominations)
             {
                 if (value > amount) continue;
-                if (amount / value <= 30)
+                if (amount / value <= 20)
                 {
                     baseValue = value;
                     break;
@@ -75,8 +78,8 @@ namespace TableGameRoom.Mobile.UI
 
             var stacks = new List<(int Value, int Count)>();
 
-            // 主体：同面额分到最多 3 摞
-            var visibleStacks = Mathf.Min(3, pieces);
+            // 主体：同面额分到最多 2 摞（原来是 3 摞，占横向空间太多）
+            var visibleStacks = Mathf.Min(2, pieces);
             var eachCount = pieces / visibleStacks;
             var extra = pieces % visibleStacks;
 
@@ -141,7 +144,7 @@ namespace TableGameRoom.Mobile.UI
 
             // 小尺寸下堆叠会让数字糊成一团，只画一枚 + 清晰的数字
             var stackable = scale >= 0.6f;
-            var visible = stackable ? Mathf.Min(count, 6) : 1;
+            var visible = stackable ? Mathf.Min(count, 4) : 1;
 
             for (var i = 0; i < visible; i++)
             {

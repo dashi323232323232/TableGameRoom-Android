@@ -535,7 +535,7 @@ namespace TableGameRoom.Mobile.Games
             UiFactory.Clear(_potChipsHost);
             if (_pot > 0)
             {
-                var potChips = ChipVisual.Create(_potChipsHost, _pot, 0.62f);
+                var potChips = ChipVisual.Create(_potChipsHost, _pot, 0.70f);
                 potChips.anchoredPosition = Vector2.zero;
             }
 

@@ -136,20 +136,22 @@ namespace TableGameRoom.Mobile.Games
                 TableRing.BuildTableBackground(tableBg, 1000f, 482f);
 
                 // 中央：底池金额 + 底池筹码
+                // 筹码放到椭圆下沿之外，不再压在牌桌中间
                 _potText = UiFactory.Label(_tableHost, "底池 $0", Theme.FontSmall, Theme.Muted,
                     TextAnchor.MiddleCenter, bold: true);
                 var ptr = _potText.rectTransform;
                 ptr.anchorMin = ptr.anchorMax = new Vector2(0.5f, 0.5f);
                 ptr.pivot = new Vector2(0.5f, 0.5f);
                 ptr.sizeDelta = new Vector2(300f, 34f);
-                ptr.anchoredPosition = new Vector2(0f, 34f);
+                ptr.anchoredPosition = new Vector2(0f, 20f);
 
                 _potChipsHost = UiFactory.Node(_tableHost, "PotChips");
                 var pcr = _potChipsHost;
                 pcr.anchorMin = pcr.anchorMax = new Vector2(0.5f, 0.5f);
                 pcr.pivot = new Vector2(0.5f, 0.5f);
-                pcr.sizeDelta = new Vector2(400f, 56f);
-                pcr.anchoredPosition = new Vector2(0f, -22f);
+                pcr.sizeDelta = new Vector2(300f, 40f);
+                // 下移到椭圆下沿，避开中央区域
+                pcr.anchoredPosition = new Vector2(0f, -34f);
 
                 // 座位层
                 _seatsHost = UiFactory.Node(_tableHost, "Seats");
@@ -805,7 +807,7 @@ namespace TableGameRoom.Mobile.Games
             UiFactory.Clear(_potChipsHost);
             if (_pot > 0)
             {
-                var potChips = ChipVisual.Create(_potChipsHost, _pot, 0.62f);
+                var potChips = ChipVisual.Create(_potChipsHost, _pot, 0.70f);
                 potChips.anchoredPosition = Vector2.zero;
             }
 
