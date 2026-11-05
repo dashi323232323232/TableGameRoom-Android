@@ -285,5 +285,11 @@ namespace TableGameRoom.Mobile.Games
 
         /// <summary>本局是否已经看过牌（影响后续的加注/比牌决策）。</summary>
         public bool Looked { get; set; }
+
+        /// <summary>
+        /// 是否已经做过「要不要看牌」的判定。
+        /// 看牌是整局一次的决定，不能每轮重掷 —— 否则几轮下来全员都会看牌。
+        /// </summary>
+        public bool LookDecided { get; set; }
     }
 }

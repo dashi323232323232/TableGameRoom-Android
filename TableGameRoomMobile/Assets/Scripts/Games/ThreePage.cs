@@ -570,6 +570,12 @@ namespace TableGameRoom.Mobile.Games
         /// 真实思考时间：3~25 秒，压力越大越久。
         /// 压力来自：轮次（越往后越紧张）+ 注额相对档位上限的比例 + 是否被加注。
         /// </summary>
+        /// <summary>
+        /// 真实思考时间：3~30 秒，压力越大越久。
+        ///
+        /// 上限取 30 是为了和行动倒计时对齐 —— 玩家看到的倒计时是 30 秒，
+        /// 真实思考不该比它还长，否则倒计时归零了人还在想，很怪。
+        /// </summary>
         private float RollThinkSeconds(int round, int stake, bool pressured)
         {
             var roundPressure = Mathf.Clamp01(round / 6f);
@@ -580,44 +586,37 @@ namespace TableGameRoom.Mobile.Games
             var pressure = roundPressure * 0.5f + stakePressure * 0.5f;
             if (pressured) pressure = Mathf.Min(1f, pressure + 0.2f);
 
-            // 3 秒打底，最高 25 秒
-            var seconds = Mathf.Lerp(3f, 25f, pressure);
+            // 3 秒打底，最高 30 秒
+            var seconds = Mathf.Lerp(3f, 30f, pressure);
 
             // ±25% 随机波动，避免节奏呆板
             seconds *= UnityEngine.Random.Range(0.75f, 1.25f);
 
-            return Mathf.Clamp(seconds, 3f, 25f);
+            return Mathf.Clamp(seconds, 3f, 30f);
         }
 
         /// <summary>
-        /// 跑一段思考过程：真实思考时间递减，同时 30 秒行动倒计时也在走。
+        /// 跑一段思考过程。
         ///
-        /// 注意两者的长度不一样：真实思考只有 3~25 秒，行动倒计时固定 30 秒。
-        /// 如果都按 1:1 递减，倒计时永远走不到 0（最多减到 5），玩家会以为卡住了。
-        /// 所以倒计时按比例折算 —— 思考结束的那一刻，倒计时正好归零。
+        /// 30 秒行动倒计时是**真实按秒走的**（玩家看到的就是 30 → 0）。
+        /// 真实思考时间（3~25 秒）是内部逻辑，到点才出结果。
+        /// 两者独立：思考结束就立刻出结果，倒计时剩下的秒数直接收掉。
         /// </summary>
         private System.Collections.IEnumerator ThinkPhase(Seat s, bool refill)
         {
             if (refill && s.ThinkLeft <= 0f)
                 s.ThinkLeft = RollThinkSeconds(_rounds, _stake, _playerRaises > 0);
 
-            var total = Mathf.Max(0.1f, s.ThinkLeft);
-            var turnTotal = s.TurnLeft > 0f ? s.TurnLeft : TurnSeconds;
-
             while (s.ThinkLeft > 0.01f)
             {
                 yield return new WaitForSeconds(0.1f);
 
                 s.ThinkLeft -= 0.1f;
-
-                // 倒计时按「剩余思考 / 总思考」等比缩放
-                var ratio = Mathf.Clamp01(s.ThinkLeft / total);
-                s.TurnLeft = turnTotal * ratio;
+                s.TurnLeft -= 0.1f;
+                if (s.TurnLeft < 0f) s.TurnLeft = 0f;
 
                 RefreshTable();
             }
-
-            s.TurnLeft = 0f;
         }
 
         private System.Collections.IEnumerator AiPlayOutRoutine()
@@ -639,15 +638,28 @@ namespace TableGameRoom.Mobile.Games
                 yield return ThinkPhase(s, refill: false);
 
                 // ---------- 决定看牌 ----------
-                if (!s.Profile.Looked && _rng.NextDouble() < 0.7)
+                // 关键：看牌是**整局一次**的决定，不是每轮重掷。
+                // 之前写成每轮 `rng < 0.7`，第一轮 70% 看，第二轮剩下的又 70% 看，
+                // 两轮下来几乎全员都看了牌，一个闷的都没有。
+                // 现在只在「还没决定过」时掷一次，而且概率压低到 35%。
+                if (!s.Profile.LookDecided)
                 {
-                    s.Profile.Looked = true;
-                    s.LastAction = "看牌";
-                    RefreshTable();
+                    s.Profile.LookDecided = true;
 
-                    // 看完牌重置思考时间，再想一轮（真人也是看完再算）
-                    s.ThinkLeft = RollThinkSeconds(_rounds, _stake, _playerRaises > 0);
-                    yield return ThinkPhase(s, refill: true);
+                    // 低档更爱闷牌（省注），高档更愿意花 3 倍看清楚
+                    var lookChance = 0.22 + 0.28 * AiTuning.Strength(
+                        (int)Mathf.Round(Mathf.Clamp((float)s.Profile.EffectiveTier - 1, 0, 6)));
+
+                    if (_rng.NextDouble() < lookChance)
+                    {
+                        s.Profile.Looked = true;
+                        s.LastAction = "看牌";
+                        RefreshTable();
+
+                        // 看完牌重置思考时间，再想一轮（真人也是看完再算）
+                        s.ThinkLeft = RollThinkSeconds(_rounds, _stake, _playerRaises > 0);
+                        yield return ThinkPhase(s, refill: true);
+                    }
                 }
 
                 // ---------- 第二段结束，正式做决定 ----------

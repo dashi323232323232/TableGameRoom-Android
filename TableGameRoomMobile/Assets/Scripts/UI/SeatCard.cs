@@ -73,44 +73,24 @@ namespace TableGameRoom.Mobile.UI
             }
 
             // ---------- 头顶倒计时 ----------
-            // 两个数字并排，画在卡片**上方外侧**（负 y 越界到卡外），
-            // 这样绝不压名字。卡片在座位层里，溢出部分是可见的。
+            // 只显示 30 秒行动倒计时。真实思考时间是内部逻辑，不展示给玩家 ——
+            // 两个数字并排反而让人看不懂哪个是哪个。
+            // 画在卡片上方外侧，绝不压名字。
             if (thinking)
             {
-                var thinkRow = UiFactory.Node(root, "ThinkRow");
-                var tr = thinkRow;
-                tr.anchorMin = tr.anchorMax = new Vector2(0.5f, 1f);
-                tr.pivot = new Vector2(0.5f, 0f);
-                tr.sizeDelta = new Vector2(76f, 20f);
-                // 往上顶出卡片外 22px
-                tr.anchoredPosition = new Vector2(0f, 22f);
-
-                // 行动倒计时（30 秒）
-                var turn = UiFactory.Card(thinkRow,
+                var bubble = UiFactory.Card(root,
                     turnLeft <= 5f ? Theme.Danger : Theme.Accent, Color.white);
-                var trr = turn.rectTransform;
-                trr.anchorMin = trr.anchorMax = new Vector2(0f, 1f);
-                trr.pivot = new Vector2(0f, 1f);
-                trr.sizeDelta = new Vector2(38f, 20f);
-                trr.anchoredPosition = Vector2.zero;
+                var br = bubble.rectTransform;
+                br.anchorMin = br.anchorMax = new Vector2(0.5f, 1f);
+                br.pivot = new Vector2(0.5f, 0f);
+                br.sizeDelta = new Vector2(44f, 22f);
+                // 往上顶出卡片外 24px
+                br.anchoredPosition = new Vector2(0f, 24f);
 
-                var turnText = UiFactory.Label(turn.transform,
+                var turnText = UiFactory.Label(bubble.transform,
                     Mathf.CeilToInt(Mathf.Max(0f, turnLeft)).ToString(),
-                    14, Color.white, TextAnchor.MiddleCenter, bold: true);
+                    15, Color.white, TextAnchor.MiddleCenter, bold: true);
                 UiFactory.Fill(turnText.rectTransform);
-
-                // 真实思考剩余
-                var think = UiFactory.Card(thinkRow, Theme.Hex("#E8EDF0"), Theme.Muted);
-                var thr = think.rectTransform;
-                thr.anchorMin = thr.anchorMax = new Vector2(0f, 1f);
-                thr.pivot = new Vector2(0f, 1f);
-                thr.sizeDelta = new Vector2(34f, 20f);
-                thr.anchoredPosition = new Vector2(40f, 0f);
-
-                var thinkText = UiFactory.Label(think.transform,
-                    $"{Mathf.CeilToInt(Mathf.Max(0f, thinkLeft))}s",
-                    12, Theme.Muted, TextAnchor.MiddleCenter, bold: true);
-                UiFactory.Fill(thinkText.rectTransform);
             }
 
             // ---------- 左侧头像 ----------
