@@ -163,17 +163,43 @@ namespace TableGameRoom.Mobile
 
         private static void EnterGame(GameDef g)
         {
-            var app = App.Instance;
-            switch (g.Key)
-            {
-                case "roulette": app.ShowRoulette(); break;
-                case "blackjack": app.ShowBlackjack(); break;
-                case "poker": app.ShowPoker(); break;
-                case "three": app.ShowThree(); break;
-                case "liar": app.ShowLiar(); break;
-                default: app.Msg($"{g.Name} 正在开发中"); break;
-            }
+            // 先进配置页（档位 / 人数），再开始游戏 —— 和桌面版三层一致
+            App.Instance.ShowGameSetup(g.Key);
         }
+
+        /// <summary>取某款游戏的配置页信息。</summary>
+        public static GameSetupPage.GameInfo InfoFor(string key)
+        {
+            foreach (var g in Games)
+            {
+                if (g.Key != key) continue;
+
+                return new GameSetupPage.GameInfo
+                {
+                    Key = g.Key,
+                    Name = g.Name,
+                    Emoji = g.Emoji,
+                    Intro = g.Desc,
+                    Rule = RuleFor(g.Key),
+                    MinSeats = g.MinSeats,
+                    MaxSeats = g.MaxSeats,
+                    // 轮盘和 21 点没有「桌人数」概念
+                    TableSeats = g.Key != "roulette" && g.Key != "blackjack"
+                };
+            }
+
+            return new GameSetupPage.GameInfo { Key = key, Name = key, Emoji = "🎲" };
+        }
+
+        private static string RuleFor(string key) => key switch
+        {
+            "roulette" => "选择红黑 / 单双 / 大小或具体号码，转动轮盘等待结果。",
+            "blackjack" => "要牌、停牌或双倍下注，尽量接近 21 点且不爆牌。庄家 17 点停牌。",
+            "poker" => "两张底牌 + 五张公共牌，翻牌前 / 翻牌 / 转牌 / 河牌四街下注，摊牌比牌型。",
+            "three" => "三张牌比牌型。闷牌跟注 1 倍；看牌后首次跟注 3 倍，之后 2 倍。可跟注、加注、比牌或弃牌。",
+            "liar" => "盖牌出牌并声明牌型，可以诚实也可以诈唬，对手可以质疑。",
+            _ => ""
+        };
 
         private static void ShowTierPicker()
         {

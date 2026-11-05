@@ -50,9 +50,24 @@ try {
 
 $parentSha = $remoteSha
 
-# ---------- 3. 逐个上传「远程 HEAD 与本地 HEAD」之间的所有变更 ----------
-$changed = git diff --name-only "$parentSha" "$sha"
-Write-Host "变更文件: $($changed.Count) 个"
+# ---------- 3. 找出「远程 HEAD 之后所有本地改动」 ----------
+# 本地历史可能因为之前断网被 reset，导致本地父提交在远程不存在。
+# 所以这里退化成「本地工作区里所有比远程新的文件」，不依赖 git 历史一致性。
+$changed = @(git status --porcelain | ForEach-Object {
+    # 形如 " M path" / "?? path" / "A  path"
+    $_.Substring(3).Trim().Trim('"')
+} | Where-Object { $_ -ne "" })
+
+# 再补上本地 HEAD 相对远程实际不同的文件（历史对不上时的兜底）
+$diffFromRemote = @(git diff --name-only "$parentSha" HEAD 2>$null)
+foreach ($f in $diffFromRemote) { if ($changed -notcontains $f) { $changed += $f } }
+
+# 兜底：把整个项目目录下受版本控制的文件都比一遍
+if ($changed.Count -eq 0) {
+    $changed = @(git ls-files)
+}
+
+Write-Host "待检查文件: $($changed.Count) 个"
 
 $entries = @()
 # 仓库根目录可能与当前目录不同（本仓库根在 D:\dsh\android），必须先定位

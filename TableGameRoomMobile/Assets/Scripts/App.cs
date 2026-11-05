@@ -267,6 +267,29 @@ namespace TableGameRoom.Mobile
 
         public void ShowModeSelect() => ShowPage("mode", ModeSelectPage.Build);
         public void ShowLobby() => ShowPage("lobby", LobbyPage.Build);
+
+        /// <summary>
+        /// 游戏配置页（对应桌面版 ShowGameSetup）。
+        /// 大厅点游戏 → 这里选档位/人数 → 再「开始游戏」进入。
+        /// </summary>
+        public void ShowGameSetup(string gameKey) =>
+            ShowPage($"setup:{gameKey}", content =>
+                UI.GameSetupPage.Build(content, LobbyPage.InfoFor(gameKey)));
+
+        /// <summary>设置桌人数并写盘。</summary>
+        public void SetSeats(int seats)
+        {
+            Save.Seats = Mathf.Clamp(seats, 2, 7);
+            PersistSave();
+        }
+
+        /// <summary>设置档位并写盘。</summary>
+        public void SetTier(int index)
+        {
+            Save.TierIndex = Mathf.Clamp(index, 0, BetTiers.Count - 1);
+            PersistSave();
+        }
+
         public void ShowRoulette() => ShowPage("roulette", Games.RoulettePage.Build);
         public void ShowBlackjack() => ShowPage("blackjack", Games.BlackjackPage.Build);
         public void ShowPoker() => ShowPage("poker", Games.PokerPage.Build);

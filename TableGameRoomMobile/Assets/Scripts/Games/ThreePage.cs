@@ -24,6 +24,14 @@ namespace TableGameRoom.Mobile.Games
             public string Status = "等待";
             public string Emoji = "😐";
             public string Result = "";
+
+            /// <summary>本轮具体做了什么，如「加注 $200」。</summary>
+            public string LastAction = "";
+
+            /// <summary>是否正在思考（头顶显示倒计时）。</summary>
+            public bool Thinking;
+            public float ThinkSeconds;
+            public float ThinkLeft;
         }
 
         private App _app;
@@ -50,6 +58,9 @@ namespace TableGameRoom.Mobile.Games
 
         /// <summary>本局已经进行了多少轮（玩家每次跟/加算一轮）。</summary>
         private int _rounds;
+
+        /// <summary>玩家看牌后已经跟过几轮（用于 3 倍 / 2 倍规则）。</summary>
+        private int _playerCallCount;
 
         /// <summary>
         /// 轮数上限。真实炸金花也有封顶，否则玩家可以无限跟注，
@@ -224,8 +235,13 @@ namespace TableGameRoom.Mobile.Games
                 if (!_playerLooked)
                     buttons.Add(UiFactory.Button(_actionHost, "看牌", Look));
 
-                buttons.Add(UiFactory.Button(_actionHost, $"跟注 ${_stake:N0}", () => PlayerAct(1)));
-                buttons.Add(UiFactory.Primary(_actionHost, $"加注 ${_stake * 2:N0}", () => PlayerAct(2)));
+                // 跟注金额随规则变化，按钮上直接写清楚
+                var callCost = CallCost;
+                var callTag = !_playerLooked ? "闷牌" : _playerCallCount == 0 ? "看牌 3×" : "2×";
+                buttons.Add(UiFactory.Button(_actionHost,
+                    $"跟注 ${callCost:N0}（{callTag}）", () => PlayerAct(1)));
+
+                buttons.Add(UiFactory.Primary(_actionHost, "加注…", ChooseRaise));
                 buttons.Add(UiFactory.Button(_actionHost, "比牌", Compare));
                 buttons.Add(UiFactory.Button(_actionHost, "弃牌", () => PlayerAct(0)));
             }
@@ -271,6 +287,7 @@ namespace TableGameRoom.Mobile.Games
             _playerCommitted = 0;
             _playerRaises = 0;
             _rounds = 0;
+            _playerCallCount = 0;
 
             var aiCount = Mathf.Clamp(_app.Seats - 1, 1, 6);
             var tierIndex = _app.TierIndex;
@@ -330,11 +347,100 @@ namespace TableGameRoom.Mobile.Games
         private void Look()
         {
             _playerLooked = true;
-            _log = $"你看牌了：{ThreeScore.Name(ThreeScore.Of(_player))}";
+            _log = $"你看牌了：{ThreeScore.Name(ThreeScore.Of(_player))}。" +
+                   " 看牌后跟注变为 3 倍，之后每轮 2 倍。";
             RefreshTable();
             BuildActions();
         }
 
+        /// <summary>
+        /// 本轮跟注需要多少。
+        ///
+        /// 炸金花的规则：
+        ///   · 闷牌（没看牌）    → 1 倍底注
+        ///   · 看牌后的第一次跟注 → 3 倍底注
+        ///   · 看牌之后的每轮     → 2 倍底注
+        ///
+        /// 这是「看牌要付代价」的核心：看牌能知道牌力，但注额也翻上去了。
+        /// </summary>
+        private int CallCost
+        {
+            get
+            {
+                if (!_playerLooked) return _stake;
+                return _playerCallCount == 0 ? _stake * 3 : _stake * 2;
+            }
+        }
+
+        /// <summary>加注倍数的基准金额（跟注额）。</summary>
+        private int RaiseBase => CallCost;
+
+        /// <summary>
+        /// 选择加注倍数。
+        /// 之前只有「加注 2×」一个按钮，没法下 2.5 倍或 3 倍。
+        /// 这里弹出常用倍数，每项直接标出实际金额。
+        /// </summary>
+        private void ChooseRaise()
+        {
+            if (!_inRound || _showdown || _playerFolded) return;
+
+            var baseCost = RaiseBase;
+            var multipliers = new[] { 2f, 2.5f, 3f, 4f, 5f };
+
+            var options = new List<string>();
+            var costs = new List<int>();
+
+            foreach (var m in multipliers)
+            {
+                var cost = Mathf.RoundToInt(baseCost * m);
+                if (cost <= 0) continue;
+
+                if (_app.Tier.Max is int cap && cost > cap) continue;
+
+                options.Add($"{m:0.#} 倍 · ${cost:N0}");
+                costs.Add(cost);
+            }
+
+            if (options.Count == 0)
+            {
+                _app.Msg("当前档位下没有可用的加注倍数。", "无法加注");
+                return;
+            }
+
+            Dialog.Pick(_app.CanvasRoot,
+                $"选择加注倍数（基准 ${baseCost:N0}）", options, 0, index =>
+                {
+                    if (index < 0 || index >= costs.Count) return;
+                    PlayerActRaise(costs[index]);
+                });
+        }
+
+        /// <summary>按指定金额加注。</summary>
+        private void PlayerActRaise(int cost)
+        {
+            if (!_inRound || _showdown || _playerFolded) return;
+
+            if (!_app.TryPay(cost))
+            {
+                _app.Msg("余额不足。", "筹码不足");
+                return;
+            }
+
+            _playerCommitted += cost;
+            _pot += cost;
+            _playerRaises++;
+            _rounds++;
+
+            // 注额跟着涨，后续跟注按新注额算
+            _stake = Mathf.Max(_stake, cost / 2);
+
+            _log = $"你加注 ${cost:N0}。";
+
+            // 停掉自己的倒计时
+            AiPlayOut();
+        }
+
+        /// <summary>玩家行动：0=弃牌，1=跟注。</summary>
         private void PlayerAct(int action)
         {
             if (!_inRound || _showdown) return;
@@ -347,20 +453,22 @@ namespace TableGameRoom.Mobile.Games
                 return;
             }
 
-            var cost = action == 2 ? _stake * 2 : _stake;
+            // 跟注金额按「闷牌 1× / 看牌首轮 3× / 之后 2×」算
+            var cost = CallCost;
 
             if (!_app.TryPay(cost))
             {
-                _app.Msg("余额不足。", "筹码不足");
+                _app.Msg($"余额不足：需要 ${cost:N0}。", "筹码不足");
                 return;
             }
 
             _playerCommitted += cost;
             _pot += cost;
-            if (action == 2) _playerRaises++;
             _rounds++;
+            _playerCallCount++;
 
-            _log = action == 2 ? $"你加注 ${cost:N0}。" : $"你跟注 ${cost:N0}。";
+            var tag = !_playerLooked ? "闷牌" : _playerCallCount == 1 ? "看牌首轮" : "看牌";
+            _log = $"你跟注 ${cost:N0}（{tag}）。";
 
             AiPlayOut();
         }
@@ -404,13 +512,46 @@ namespace TableGameRoom.Mobile.Games
             AiPlayOut();
         }
 
+        /// <summary>
+        /// 电脑逐个行动。
+        ///
+        /// 之前是一次性把所有 AI 算完，玩家看到的就是「瞬间全变」，
+        /// 没有任何思考过程。现在每个座位依次：
+        ///   1. 头顶显示倒计时（按档位和注额算，和桌面版 ThinkTiming 一致）
+        ///   2. 倒计时结束才出结果
+        ///   3. 立刻重绘，玩家能看到它跟了多少 / 加了多少 / 弃牌
+        /// </summary>
         private void AiPlayOut()
+        {
+            StartCoroutine(AiPlayOutRoutine());
+        }
+
+        private System.Collections.IEnumerator AiPlayOutRoutine()
         {
             _currentSeatName = "";
 
-            foreach (var s in _seats.Where(x => !x.Folded))
+            foreach (var s in _seats.Where(x => !x.Folded).ToList())
             {
+                if (s.Folded) continue;
+
+                // 高亮当前行动的座位
                 _currentSeatName = s.Name;
+                s.Thinking = true;
+                s.ThinkSeconds = ThinkTiming.Delay(4, _stake, _app.Tier.Max) / 1000f;
+                s.ThinkLeft = s.ThinkSeconds;
+                RefreshTable();
+
+                // 逐秒倒数
+                while (s.ThinkLeft > 0.01f)
+                {
+                    yield return new WaitForSeconds(0.1f);
+                    s.ThinkLeft -= 0.1f;
+                    RefreshTable();
+                }
+
+                s.Thinking = false;
+                s.ThinkLeft = 0f;
+                _currentSeatName = "";
 
                 // 还在局中的其他座位数（不含自己），玩家未弃牌也算一个
                 var others = _seats.Count(x => !x.Folded && !ReferenceEquals(x, s))
@@ -425,11 +566,16 @@ namespace TableGameRoom.Mobile.Games
                     s.Status = "弃牌";
                     s.Emoji = "😞";
                     _log += $" {s.Name} 弃牌。";
+                    RefreshTable();
                     continue;
                 }
 
-                // 记录「这位 AI 已经陪玩家跟了几轮」，供下次判定加粘性
+                // 记录「这位 AI 已经陪玩家跟了几轮」
                 s.Profile.DecisionsUsed++;
+
+                // 看牌：跟过一轮后大部分 AI 会看，看牌后才能加注/比牌
+                if (!s.Profile.Looked && (s.Profile.DecisionsUsed >= 1 || _rng.NextDouble() < 0.5))
+                    s.Profile.Looked = true;
 
                 if (_ai.Raises(ctx, s.Profile))
                 {
@@ -438,6 +584,7 @@ namespace TableGameRoom.Mobile.Games
                     _pot += cost;
                     s.Status = "加注";
                     s.Emoji = "😄";
+                    s.LastAction = $"加注 ${cost:N0}";
                     _log += $" {s.Name} 加注 ${cost:N0}。";
                 }
                 else
@@ -446,7 +593,12 @@ namespace TableGameRoom.Mobile.Games
                     _pot += _stake;
                     s.Status = "跟注";
                     s.Emoji = "😐";
+                    s.LastAction = $"跟注 ${_stake:N0}";
                 }
+
+                // 每位行动完立刻重绘
+                RefreshTable();
+                yield return new WaitForSeconds(0.15f);
             }
 
             var alive = _seats.Count(s => !s.Folded);
@@ -458,13 +610,13 @@ namespace TableGameRoom.Mobile.Games
             {
                 _log += $" 已达 {MaxRounds} 轮上限，强制摊牌。";
                 Showdown();
-                return;
+                yield break;
             }
 
             if (alive == 0 && !_playerFolded)
             {
                 WinPot("全部对手弃牌");
-                return;
+                yield break;
             }
 
             if (_playerFolded && alive <= 1)
@@ -474,13 +626,13 @@ namespace TableGameRoom.Mobile.Games
                 _log += " 牌局结束。";
                 RefreshTable();
                 BuildActions();
-                return;
+                yield break;
             }
 
             if (alive <= 1 && !_playerFolded)
             {
                 Showdown();
-                return;
+                yield break;
             }
             RefreshTable();
             BuildActions();
@@ -587,7 +739,11 @@ namespace TableGameRoom.Mobile.Games
                         _seatsHost,
                         s.Name, s.Emoji, i,
                         s.Status, s.Committed, s.Folded, isCurrent,
-                        s.Result, s.Cards, hidden: !_showdown);
+                        s.Result, s.Cards, hidden: !_showdown,
+                        looked: s.Profile.Looked,
+                        lastAction: s.LastAction,
+                        thinking: s.Thinking,
+                        thinkLeft: s.ThinkLeft);
 
                     var cr = card;
                     cr.anchorMin = cr.anchorMax = new Vector2(0.5f, 0.5f);

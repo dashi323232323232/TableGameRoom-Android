@@ -14,96 +14,101 @@ namespace TableGameRoom.Mobile.Games
         /// <summary>
         /// 炸金花 AI 是否继续跟注。
         ///
-        /// 用「牌型查表 + 真实胜率」混合，和桌面版 Three.cs::AiThreeKeeps 同一套思路。
-        /// 之前这里把 ThreeScore 直接归一化成 0..1 再和 0.42 比，
-        /// 但单张只算得出 0.02、对子 0.17 —— 而单张和对子占实际牌型的大多数，
-        /// 结果就是玩家一直跟注时 AI 一轮轮全弃，桌面版没这个问题。
+        /// 关键设计（修掉「玩家一直跟注 → 全桌弃光」）：
+        ///
+        /// 1. **闷牌几乎不弃**。没看牌时跟注只要 1 倍，很便宜，真人也不会走。
+        /// 2. **看牌后按牌型决定**，且跟了就锁定（<see cref="ThreeAiProfile.Staying"/>），
+        ///    本局后续轮次不再重新掷骰。
+        ///    之前每轮独立重掷，跟 3 轮后每个 AI 被抽掉的概率是 1-0.42³ ≈ 93%，
+        ///    6 人桌几乎必然全灭 —— 这就是「无论什么操作，只要不弃牌，所有人都会弃」。
+        /// 3. 牌型基准概率按真实牌局校准，单张也有 40% 以上会跟，不会一边倒。
         /// </summary>
         public bool Continues(ThreeAiContext ctx, ThreeAiProfile seat)
         {
+            // 已经表态过「跟」，本局不再反悔
+            if (seat.Staying) return true;
+
             var tierIndex = TierIndex(seat.EffectiveTier);
             var strength = AiTuning.Strength(tierIndex);
 
             var score = ThreeScore.Of(seat.Cards);
             var category = (int)(score / 1_000_000L);
 
-            // ---------- 1) 查表概率：按牌型定基准 ----------
-            double tableProb;
+            // ---------- 1) 闷牌：几乎必跟 ----------
+            // 没看牌时跟注只要 1 倍底注，很便宜。只有被连续加注才会走。
+            // 注意这里**不锁** Staying —— 看过牌之后还要重新判断一次。
+            if (!seat.Looked)
+            {
+                var blindFold = 0.04;
+                if (ctx.PlayerRaises >= 2) blindFold += 0.12;
+                if (ctx.PlayerRaises >= 4) blindFold += 0.15;
+                return _rng.NextDouble() >= blindFold;
+            }
+
+            // ---------- 2) 看牌后：按牌型 ----------
+            double keep;
             switch (category)
             {
-                case 5: tableProb = 0.96; break;   // 同花顺
-                case 4: tableProb = 0.94; break;   // 豹子
-                case 3: tableProb = 0.78; break;   // 顺子
-                case 2: tableProb = 0.66; break;   // 同花
-                case 1:                            // 对子：看对子大小
+                case 5: keep = 0.98; break;    // 同花顺
+                case 4: keep = 0.96; break;    // 豹子
+                case 3: keep = 0.90; break;    // 顺子
+                case 2: keep = 0.84; break;    // 同花
+                case 1:                        // 对子：看对子大小
                     {
                         var pairRank = PairRank(seat.Cards);
-                        tableProb = 0.52 + (pairRank - 7) * 0.03;
+                        keep = 0.62 + (pairRank - 7) * 0.025;   // A 对 ~0.80，小对 ~0.50
                         break;
                     }
-                default:                           // 单张：看最大牌
+                default:                       // 单张：看最大牌
                     {
                         var high = HighCard(seat.Cards);
-                        tableProb = 0.28 + (high - 7) * 0.022;
+                        keep = 0.40 + (high - 7) * 0.040;       // A 高 ~0.68，小牌 ~0.40
                         break;
                     }
             }
 
-            // 风险容忍：高风险更愿意用弱牌跟
-            tableProb += (seat.RiskTolerance - 0.5) * 0.10;
-
-            // 低档向 0.45 回归（行为更随机）
+            // 低档更随机：向 0.55 回归，但幅度很小（之前回 0.45 太狠，把所有牌型拉平了）
             if (strength < 0.5)
-                tableProb = 0.45 + (tableProb - 0.45) * (0.55 + strength * 0.9);
+                keep = 0.55 + (keep - 0.55) * (0.75 + strength * 0.5);
 
-            // 玩家加注施压（低档更怕，高档几乎不怕）
-            var pressure = 0.0;
+            // 风险容忍：低档更莽
+            keep += (seat.RiskTolerance - 0.5) * 0.12;
+
+            // 被玩家加注施压（低档更怕，高档几乎不怕）
             if (ctx.PlayerRaises >= 1)
-                pressure = AiTuning.Lerp(0.22, 0.05, strength) * (1.10 - seat.PressureResistance * 0.55);
-            tableProb -= pressure;
+                keep -= AiTuning.Lerp(0.18, 0.04, strength)
+                        * (1.10 - seat.PressureResistance * 0.55);
 
             // 计算误差
-            tableProb += (_rng.NextDouble() - 0.5) * seat.CalculationNoise;
-            tableProb = Math.Clamp(tableProb, 0.05, 0.98);
+            keep += (_rng.NextDouble() - 0.5) * seat.CalculationNoise;
 
-            // ---------- 2) 真实胜率：从剩余牌模拟 ----------
-            var liveOpponents = ctx.LiveOpponents;
-            if (liveOpponents < 1) liveOpponents = 1;
+            // ---------- 3) 真实胜率修正（高档才做模拟） ----------
+            var trials = (int)Math.Round(AiTuning.Lerp(0, 2000, strength * strength));
+            if (trials >= 30)
+            {
+                var liveOpp = Math.Max(1, ctx.LiveOpponents);
+                var winRate = EstimateWinRate(seat.Cards, liveOpp, trials);
 
-            var trials = (int)Math.Round(AiTuning.Lerp(0, 2400, strength * strength));
-            double winRateProb;
-            if (trials < 30)
-            {
-                winRateProb = tableProb;    // 低档不做模拟
-            }
-            else
-            {
-                var winRate = EstimateWinRate(seat.Cards, liveOpponents, trials);
                 var callCost = Math.Max(1, ctx.Stake);
                 var potOdds = callCost / (double)(ctx.Pot + callCost);
-                var required = potOdds * 0.9 + 0.02;
-                if (ctx.PlayerRaises >= 1) required += 0.06;
+                var required = potOdds * 0.85;
 
-                winRateProb = winRate >= required
-                    ? Math.Clamp(0.55 + (winRate - required) * 1.5, 0, 0.99)
-                    : Math.Clamp(0.55 - (required - winRate) * 1.5, 0.02, 0.55);
+                // 胜率高于所需 → 更愿意跟；低于 → 更想走
+                var adjust = (winRate - required) * 1.2;
+                keep = AiTuning.BlendThree(keep, keep + adjust, tierIndex);
             }
 
-            // ---------- 3) 按档位混合 ----------
-            var finalProb = AiTuning.BlendThree(tableProb, winRateProb, tierIndex);
+            // ---------- 4) 连续跟注的粘性 ----------
+            // 玩家一直跟注说明要么强牌要么在诈，AI 陪下去的意愿会上升
+            keep += Math.Min(0.30, seat.DecisionsUsed * 0.06);
 
-            // ---------- 4) 粘性 ----------
-            // 炸金花里玩家一直跟注不会改变注额，如果每轮都独立重掷同一个概率，
-            // 6 个 AI 掷 8 轮几乎必然全灭（实测 8 轮后剩 0.4 个）。
-            // 真实牌局里 AI 会「读人」：对面一直跟说明要么强牌要么在诈，
-            // 陪下去的意愿会上升。这里让续跟次数线性抬升继续概率。
-            var stickiness = Math.Min(0.55, seat.DecisionsUsed * 0.11);
-            finalProb += stickiness;
+            keep = Math.Clamp(keep, 0.05, 0.97);
 
-            // 弱牌诈唬
-            if (category <= 1 && _rng.NextDouble() < seat.BluffTendency) return true;
+            var stays = _rng.NextDouble() < keep;
 
-            return _rng.NextDouble() < Math.Clamp(finalProb, 0.03, 0.97);
+            // 看牌后决定跟，本局就锁定，不再重掷
+            if (stays) seat.Staying = true;
+            return stays;
         }
 
         /// <summary>
@@ -268,8 +273,17 @@ namespace TableGameRoom.Mobile.Games
         /// 已经用过的「继续」判定次数。
         /// 炸金花里玩家每点一次跟注，都会轮到 AI 表态；
         /// 如果每次都重新掷骰，跟得越多全桌越可能被抽干（概率是累积的）。
-        /// 这里按轮次缓存结论，同一局里每个 AI 只掷有限次。
         /// </summary>
         public int DecisionsUsed { get; set; }
+
+        /// <summary>
+        /// 本局已经决定「继续跟」。一旦为 true，后续轮次不再重新判定。
+        /// 这是修掉「一直跟注就全员弃牌」的关键 —— 每轮重掷会让概率累积，
+        /// 6 人桌跟 3 轮几乎必然全灭。
+        /// </summary>
+        public bool Staying { get; set; }
+
+        /// <summary>本局是否已经看过牌（影响后续的加注/比牌决策）。</summary>
+        public bool Looked { get; set; }
     }
 }

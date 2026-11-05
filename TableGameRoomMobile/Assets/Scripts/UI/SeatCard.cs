@@ -6,35 +6,29 @@ using TableGameRoom.Mobile.Core;
 namespace TableGameRoom.Mobile.UI
 {
     /// <summary>
-    /// 座位卡片 —— 与桌面版 Poker.cs 的 SeatView 对齐，但把头像放进卡片。
+    /// 座位卡片。
     ///
-    /// 桌面版结构（宽 132）：名字+表情 → 两张牌(compact) → 状态·注额 → 筹码
-    /// 安卓竖屏空间更紧，改成左右两栏：
+    ///   ┌────────────────────────┐
+    ///   │        ╭─────╮          │  ← 倒计时气泡（思考时才出现）
+    ///   │  ╭──╮  电脑 2 · 已看牌   │
+    ///   │  │🙂│  [牌][牌]         │
+    ///   │  ╰──╯  加注 $200        │
+    ///   └────────────────────────┘
     ///
-    ///   ┌──────────────────────┐
-    ///   │  ╭──╮  电脑 2         │
-    ///   │  │🙂│  [牌][牌]       │
-    ///   │  ╰──╯  跟注 · $200    │
-    ///   └──────────────────────┘
-    ///
-    /// 头像用烘焙的圆形脸（不是 emoji 字符 —— Noto CJK 没有 emoji 字形）。
-    /// 筹码只以文字「· $200」表达，卡片里不再叠图形，避免压住牌面。
+    /// 每行都带明确信息：
+    ///   · 名字后面标「已看牌 / 未看牌」
+    ///   · 底牌用小牌展示（未摊牌时是背面）
+    ///   · 最后一行写清本轮具体动作和金额
     /// </summary>
     public static class SeatCard
     {
-        /// <summary>座位卡片尺寸（与 TableRing.SeatWidth 对应）。</summary>
         public const float Width = TableRing.SeatWidth;
 
-        /// <summary>卡片内小牌尺寸。</summary>
         public const float MiniCardWidth = 26f;
         public const float MiniCardHeight = 36f;
 
-        /// <summary>卡片内头像直径。</summary>
-        private const float AvatarSize = 40f;
+        private const float AvatarSize = 38f;
 
-        /// <summary>创建座位卡片。返回卡片根节点。</summary>
-        /// <param name="cards">该座位的底牌；为空则显示 “—”。</param>
-        /// <param name="hidden">是否盖牌（未摊牌时对手的牌显示背面）。</param>
         public static RectTransform Create(
             Transform parent,
             string name,
@@ -46,7 +40,11 @@ namespace TableGameRoom.Mobile.UI
             bool isCurrent,
             string result = "",
             IReadOnlyList<Card> cards = null,
-            bool hidden = true)
+            bool hidden = true,
+            bool looked = false,
+            string lastAction = "",
+            bool thinking = false,
+            float thinkLeft = 0f)
         {
             var root = UiFactory.Node(parent, $"Seat_{name}");
             var rt = root;
@@ -55,7 +53,7 @@ namespace TableGameRoom.Mobile.UI
             // ---------- 卡片底 ----------
             var bg = UiFactory.Card(root,
                 folded ? Theme.Hex("#EEF2F3") : Theme.Surface,
-                isCurrent ? Theme.Accent : Theme.PanelBorder);
+                isCurrent || thinking ? Theme.Accent : Theme.PanelBorder);
 
             var bgRt = bg.rectTransform;
             bgRt.anchorMin = Vector2.zero;
@@ -63,7 +61,7 @@ namespace TableGameRoom.Mobile.UI
             bgRt.offsetMin = Vector2.zero;
             bgRt.offsetMax = Vector2.zero;
 
-            if (isCurrent)
+            if (isCurrent || thinking)
             {
                 var outline = bg.gameObject.GetComponent<Outline>();
                 if (outline != null)
@@ -73,44 +71,63 @@ namespace TableGameRoom.Mobile.UI
                 }
             }
 
-            // ---------- 左侧：头像 ----------
+            // ---------- 头顶倒计时气泡 ----------
+            // 画在卡片内部左上角（头像正上方），不覆盖名字那一行。
+            // 名字从 textLeft 开始，气泡只占头像那一条竖线的宽度。
+            if (thinking)
+            {
+                var bubble = UiFactory.Card(root,
+                    thinkLeft <= 5f ? Theme.Danger : Theme.Accent, Color.white);
+                var br = bubble.rectTransform;
+                br.anchorMin = br.anchorMax = new Vector2(0f, 1f);
+                br.pivot = new Vector2(0.5f, 1f);
+                br.sizeDelta = new Vector2(46f, 22f);
+                // 正对头像中线，紧贴卡片顶部
+                br.anchoredPosition = new Vector2(6f + AvatarSize * 0.5f, -1f);
+
+                var secs = UiFactory.Label(bubble.transform,
+                    Mathf.CeilToInt(Mathf.Max(0f, thinkLeft)).ToString(),
+                    15, Color.white, TextAnchor.MiddleCenter, bold: true);
+                UiFactory.Fill(secs.rectTransform);
+            }
+
+            // ---------- 左侧头像 ----------
             var avatar = AvatarVisual.Create(root, name, emoji, seatIndex, false, AvatarSize);
             var ar = avatar;
             ar.anchorMin = ar.anchorMax = new Vector2(0f, 0.5f);
             ar.pivot = new Vector2(0f, 0.5f);
-            ar.anchoredPosition = new Vector2(7f, 0f);
+            ar.anchoredPosition = new Vector2(6f, 0f);
 
-            // 弃牌的人整张卡压暗，一眼能看出出局
             if (folded)
             {
                 var avImg = avatar.GetComponent<Image>();
                 if (avImg != null) avImg.color = new Color(1f, 1f, 1f, 0.45f);
             }
 
-            // 右侧内容区的左边界
-            var textLeft = 7f + AvatarSize + 7f;
-            var textWidth = Width - textLeft - 6f;
+            var textLeft = 6f + AvatarSize + 6f;
+            var textWidth = Width - textLeft - 5f;
 
-            // ---------- 右上：名字 ----------
-            var nameText = UiFactory.Label(root, Shorten(name), 17,
+            // ---------- 第一行：名字 + 看牌状态 ----------
+            var lookTag = folded ? "" : looked ? " · 已看牌" : " · 未看牌";
+            var nameText = UiFactory.Label(root, Shorten(name) + lookTag, 15,
                 folded ? Theme.Muted : Theme.Ink, TextAnchor.MiddleLeft, bold: true);
             var nr = nameText.rectTransform;
             nr.anchorMin = nr.anchorMax = new Vector2(0f, 1f);
             nr.pivot = new Vector2(0f, 1f);
-            nr.sizeDelta = new Vector2(textWidth, 22f);
-            nr.anchoredPosition = new Vector2(textLeft, -5f);
+            nr.sizeDelta = new Vector2(textWidth, 20f);
+            nr.anchoredPosition = new Vector2(textLeft, -4f);
 
-            // ---------- 右中：底牌 ----------
+            // ---------- 第二行：底牌 ----------
             var row = UiFactory.Node(root, "Cards");
             var rr2 = row;
             rr2.anchorMin = rr2.anchorMax = new Vector2(0f, 1f);
             rr2.pivot = new Vector2(0f, 1f);
             rr2.sizeDelta = new Vector2(textWidth, MiniCardHeight);
-            rr2.anchoredPosition = new Vector2(textLeft, -27f);
+            rr2.anchoredPosition = new Vector2(textLeft, -24f);
 
             if (cards == null || cards.Count == 0)
             {
-                var dash = UiFactory.Label(row, "—", 15, Theme.Muted, TextAnchor.MiddleLeft);
+                var dash = UiFactory.Label(row, "—", 14, Theme.Muted, TextAnchor.MiddleLeft);
                 UiFactory.Fill(dash.rectTransform);
             }
             else
@@ -127,26 +144,51 @@ namespace TableGameRoom.Mobile.UI
                 }
             }
 
-            // ---------- 右下：状态 · 注额 ----------
-            var info = folded ? "已弃牌"
-                : !string.IsNullOrEmpty(result) ? result
-                : committed > 0 ? $"{status} · ${committed:N0}"
-                : status;
+            // ---------- 第三行：本轮动作 + 累计注额 ----------
+            // 优先级：摊牌结果 > 本轮具体动作 > 状态
+            string info;
+            Color infoColor;
 
-            var infoText = UiFactory.Label(root, info, 15,
-                folded ? Theme.Muted : isCurrent ? Theme.Accent : Theme.Muted,
-                TextAnchor.MiddleLeft, bold: isCurrent || !string.IsNullOrEmpty(result));
+            if (folded)
+            {
+                info = "已弃牌";
+                infoColor = Theme.Muted;
+            }
+            else if (!string.IsNullOrEmpty(result))
+            {
+                info = result;
+                infoColor = isCurrent ? Theme.Accent : Theme.Ink;
+            }
+            else if (!string.IsNullOrEmpty(lastAction))
+            {
+                info = lastAction;
+                infoColor = lastAction.StartsWith("加注") ? Theme.Danger
+                          : lastAction.StartsWith("跟注") ? Theme.Accent
+                          : Theme.Muted;
+            }
+            else if (committed > 0)
+            {
+                info = $"{status} · ${committed:N0}";
+                infoColor = Theme.Muted;
+            }
+            else
+            {
+                info = status;
+                infoColor = Theme.Muted;
+            }
+
+            var infoText = UiFactory.Label(root, info, 14, infoColor,
+                TextAnchor.MiddleLeft, bold: !string.IsNullOrEmpty(lastAction) || !string.IsNullOrEmpty(result));
 
             var ir = infoText.rectTransform;
             ir.anchorMin = ir.anchorMax = new Vector2(0f, 0f);
             ir.pivot = new Vector2(0f, 0f);
-            ir.sizeDelta = new Vector2(textWidth, 20f);
-            ir.anchoredPosition = new Vector2(textLeft, 5f);
+            ir.sizeDelta = new Vector2(textWidth, 18f);
+            ir.anchoredPosition = new Vector2(textLeft, 4f);
 
             return rt;
         }
 
-        /// <summary>卡片里的小牌：盖牌显示蓝底 “?”，明牌显示点数 + 花色。</summary>
         private static RectTransform MiniCard(Transform parent, Card card, bool hidden)
         {
             var go = new GameObject("MiniCard", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
@@ -190,12 +232,9 @@ namespace TableGameRoom.Mobile.UI
             return rt;
         }
 
-        /// <summary>名字太长会撑破卡片，截断。</summary>
         private static string Shorten(string name)
         {
             if (string.IsNullOrEmpty(name)) return "";
-
-            // "电脑 1" 这种保持原样；其他过长的截断
             if (name.StartsWith("电脑")) return name;
             return name.Length <= 5 ? name : name.Substring(0, 5);
         }
