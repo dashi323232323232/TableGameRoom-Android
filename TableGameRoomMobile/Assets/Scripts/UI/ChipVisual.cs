@@ -38,7 +38,10 @@ namespace TableGameRoom.Mobile.UI
 
         /// <summary>
         /// 创建一堆筹码。amount 为 0 时返回空容器。
-        /// 返回的容器尺寸就是这堆筹码的实际占用空间（调用方可据此居中）。
+        ///
+        /// 关键：**不跨面额凑数**。之前用贪心法把 $500 直接拆成 1 枚 500，
+        /// 5 个人各下 100 的底池看起来像「一个 500 的筹码」，很怪。
+        /// 现在以基准面额为单位：5×100 就是 5 枚 100，分 3 摞堆起来。
         /// </summary>
         public static RectTransform Create(Transform parent, int amount, float scale = 1f)
         {
@@ -55,21 +58,43 @@ namespace TableGameRoom.Mobile.UI
                 return rt;
             }
 
-            // 先算出所有摞的规格
-            var remaining = amount;
-            var stacks = new List<(int Value, int Count)>();
+            // 选基准面额：从大到小找第一个「枚数合理」的（≤30 枚，即 3 摞 × 10）
+            var baseValue = 1;
             foreach (var (value, _) in Denominations)
             {
-                var pieces = remaining / value;
-                remaining %= value;
-                if (pieces == 0) continue;
+                if (value > amount) continue;
+                if (amount / value <= 30)
+                {
+                    baseValue = value;
+                    break;
+                }
+            }
 
-                var visibleStacks = Mathf.Min(3, pieces);
-                var eachCount = pieces / visibleStacks;
-                var extra = pieces % visibleStacks;
+            var pieces = Mathf.Max(1, amount / baseValue);
+            var remainder = amount % baseValue;
 
-                for (var i = 0; i < visibleStacks; i++)
-                    stacks.Add((value, eachCount + (i < extra ? 1 : 0)));
+            var stacks = new List<(int Value, int Count)>();
+
+            // 主体：同面额分到最多 3 摞
+            var visibleStacks = Mathf.Min(3, pieces);
+            var eachCount = pieces / visibleStacks;
+            var extra = pieces % visibleStacks;
+
+            for (var i = 0; i < visibleStacks; i++)
+            {
+                var count = eachCount + (i < extra ? 1 : 0);
+                if (count > 0) stacks.Add((baseValue, count));
+            }
+
+            // 余数：用不超过它的小面额补一枚，保证总额精确
+            if (remainder > 0)
+            {
+                foreach (var (value, _) in Denominations)
+                {
+                    if (value > remainder) continue;
+                    stacks.Add((value, Mathf.Max(1, remainder / value)));
+                    break;
+                }
             }
 
             // 横向总宽（摞之间重叠 22%，看起来才像一堆）

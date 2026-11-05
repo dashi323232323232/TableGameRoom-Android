@@ -43,6 +43,17 @@ namespace TableGameRoom.Mobile.Games
         private readonly List<Card> _community = new List<Card>();
         private readonly List<Card> _player = new List<Card>();
 
+        /// <summary>整局共用的一副牌，发完底牌后剩下的给公共牌。</summary>
+        private List<Card> _deck = new List<Card>();
+
+        /// <summary>从牌堆顶取一张。</summary>
+        private Card Pop()
+        {
+            var c = _deck[_deck.Count - 1];
+            _deck.RemoveAt(_deck.Count - 1);
+            return c;
+        }
+
         private int _pot;
         private int _stake;
         private int _stage;
@@ -129,12 +140,13 @@ namespace TableGameRoom.Mobile.Games
                 chr2.sizeDelta = new Vector2(560f, 120f);
                 chr2.anchoredPosition = new Vector2(0f, 30f);
 
+                // 底池筹码放到公共牌下方更远处，避免压住牌面
                 _potChipsHost = UiFactory.Node(_tableHost, "PotChips");
                 var pcr = _potChipsHost;
                 pcr.anchorMin = pcr.anchorMax = new Vector2(0.5f, 0.5f);
                 pcr.pivot = new Vector2(0.5f, 0.5f);
-                pcr.sizeDelta = new Vector2(400f, 50f);
-                pcr.anchoredPosition = new Vector2(0f, -42f);
+                pcr.sizeDelta = new Vector2(400f, 40f);
+                pcr.anchoredPosition = new Vector2(0f, -70f);
 
                 // 座位层（电脑座位按归一化坐标环绕椭圆）
                 _seatsHost = UiFactory.Node(_tableHost, "Seats");
@@ -279,11 +291,15 @@ namespace TableGameRoom.Mobile.Games
 
             var aiCount = Mathf.Clamp(_app.Seats - 1, 1, 6);
             var tierIndex = _app.TierIndex;
-            var deck = Deck.New(new System.Random());
+
+            // 整局只用一副牌：洗完发完底牌后，剩下的留给公共牌。
+            // 之前每个街都 Deck.New() 重洗，等于公共牌整副重发，
+            // AI 的胜率计算全建立在乱掉的牌面上。
+            _deck = Deck.New(new System.Random());
 
             // 我的底牌
-            _player.Add(deck[deck.Count - 1]); deck.RemoveAt(deck.Count - 1);
-            _player.Add(deck[deck.Count - 1]); deck.RemoveAt(deck.Count - 1);
+            _player.Add(Pop());
+            _player.Add(Pop());
 
             // AI 座位
             for (var i = 0; i < aiCount; i++)
@@ -302,8 +318,8 @@ namespace TableGameRoom.Mobile.Games
                     }
                 };
 
-                seat.Hole.Add(deck[deck.Count - 1]); deck.RemoveAt(deck.Count - 1);
-                seat.Hole.Add(deck[deck.Count - 1]); deck.RemoveAt(deck.Count - 1);
+                seat.Hole.Add(Pop());
+                seat.Hole.Add(Pop());
                 _seats.Add(seat);
             }
 
@@ -363,9 +379,15 @@ namespace TableGameRoom.Mobile.Games
                 // 标记当前行动的座位，让牌桌高亮它
                 _currentSeatName = s.Name;
 
+                // 真正还在局中的对手数：其他没弃牌的座位 + 玩家（如果没弃牌）。
+                // 之前这里传的是「存活座位总数」，把 AI 自己也算进去了，
+                // 对手数偏大 → 胜率被低估 → 一直跟注就会一路弃到没人。
+                var opponents = _seats.Count(x => !x.Folded && !ReferenceEquals(x, s))
+                                + (_playerFolded ? 0 : 1);
                 var live = _seats.Count(x => !x.Folded);
+
                 var ctx = new PokerAiContext(
-                    _community, live, live + (_playerFolded ? 0 : 1),
+                    _community, Math.Max(1, opponents), live,
                     _stake, _pot, _stage, _lastPlayerAction, _playerRaises, _playerFolded);
 
                 if (!_ai.Continues(ctx, s.Profile))
@@ -430,10 +452,9 @@ namespace TableGameRoom.Mobile.Games
                 return;
             }
 
-            // 发公共牌
-            var deck = Deck.New(new System.Random());
+            // 发公共牌 —— 从同一副牌的剩余部分取，不能重洗
             var count = _stage == 1 ? 3 : 1;
-            for (var i = 0; i < count; i++) _community.Add(deck[i]);
+            for (var i = 0; i < count; i++) _community.Add(Pop());
 
             _log += $" 进入{StageNames[_stage]}。";
 
@@ -514,7 +535,7 @@ namespace TableGameRoom.Mobile.Games
             UiFactory.Clear(_potChipsHost);
             if (_pot > 0)
             {
-                var potChips = ChipVisual.Create(_potChipsHost, _pot, 0.80f);
+                var potChips = ChipVisual.Create(_potChipsHost, _pot, 0.62f);
                 potChips.anchoredPosition = Vector2.zero;
             }
 

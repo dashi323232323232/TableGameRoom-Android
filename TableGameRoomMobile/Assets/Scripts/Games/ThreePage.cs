@@ -48,6 +48,16 @@ namespace TableGameRoom.Mobile.Games
         private int _playerCommitted;
         private int _playerRaises;
 
+        /// <summary>本局已经进行了多少轮（玩家每次跟/加算一轮）。</summary>
+        private int _rounds;
+
+        /// <summary>
+        /// 轮数上限。真实炸金花也有封顶，否则玩家可以无限跟注，
+        /// 每轮都逼所有 AI 重新表态 —— 概率累积下来必然把全桌抽干。
+        /// 到顶后强制摊牌，牌大的赢。
+        /// </summary>
+        private const int MaxRounds = 6;
+
         private Text _potText;
         private Text _statusText;
         private Text _logText;
@@ -260,6 +270,7 @@ namespace TableGameRoom.Mobile.Games
             _log = "";
             _playerCommitted = 0;
             _playerRaises = 0;
+            _rounds = 0;
 
             var aiCount = Mathf.Clamp(_app.Seats - 1, 1, 6);
             var tierIndex = _app.TierIndex;
@@ -281,6 +292,7 @@ namespace TableGameRoom.Mobile.Games
                     {
                         EffectiveTier = tierIndex + 1,
                         PressureResistance = AiTuning.PressureResistance(tierIndex),
+                        RiskTolerance = AiTuning.RiskTolerance(tierIndex),
                         CalculationNoise = AiTuning.CalculationNoise(tierIndex),
                         BluffTendency = AiTuning.BluffTendency(tierIndex)
                     }
@@ -346,6 +358,7 @@ namespace TableGameRoom.Mobile.Games
             _playerCommitted += cost;
             _pot += cost;
             if (action == 2) _playerRaises++;
+            _rounds++;
 
             _log = action == 2 ? $"你加注 ${cost:N0}。" : $"你跟注 ${cost:N0}。";
 
@@ -399,7 +412,12 @@ namespace TableGameRoom.Mobile.Games
             {
                 _currentSeatName = s.Name;
 
-                var ctx = new ThreeAiContext(_stake, _pot, _playerRaises, _playerFolded);
+                // 还在局中的其他座位数（不含自己），玩家未弃牌也算一个
+                var others = _seats.Count(x => !x.Folded && !ReferenceEquals(x, s))
+                             + (_playerFolded ? 0 : 1);
+
+                var ctx = new ThreeAiContext(_stake, _pot, _playerRaises, _playerFolded,
+                    Math.Max(1, others));
 
                 if (!_ai.Continues(ctx, s.Profile))
                 {
@@ -409,6 +427,9 @@ namespace TableGameRoom.Mobile.Games
                     _log += $" {s.Name} 弃牌。";
                     continue;
                 }
+
+                // 记录「这位 AI 已经陪玩家跟了几轮」，供下次判定加粘性
+                s.Profile.DecisionsUsed++;
 
                 if (_ai.Raises(ctx, s.Profile))
                 {
@@ -431,6 +452,14 @@ namespace TableGameRoom.Mobile.Games
             var alive = _seats.Count(s => !s.Folded);
 
             _currentSeatName = "";
+
+            // 轮数封顶：到了上限就摊牌，避免玩家无限跟注把 AI 一个个抽干
+            if (_rounds >= MaxRounds && alive > 0 && !_playerFolded)
+            {
+                _log += $" 已达 {MaxRounds} 轮上限，强制摊牌。";
+                Showdown();
+                return;
+            }
 
             if (alive == 0 && !_playerFolded)
             {
@@ -527,7 +556,7 @@ namespace TableGameRoom.Mobile.Games
             UiFactory.Clear(_potChipsHost);
             if (_pot > 0)
             {
-                var potChips = ChipVisual.Create(_potChipsHost, _pot, 0.80f);
+                var potChips = ChipVisual.Create(_potChipsHost, _pot, 0.62f);
                 potChips.anchoredPosition = Vector2.zero;
             }
 
