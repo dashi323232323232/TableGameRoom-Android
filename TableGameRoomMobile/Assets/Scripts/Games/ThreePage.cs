@@ -617,26 +617,33 @@ namespace TableGameRoom.Mobile.Games
 
         /// <summary>
         /// 跑一段思考过程：真实思考时间递减，同时 30 秒行动倒计时也在走。
-        /// 两个数字都会显示，玩家能看到「他还有多少时间」和「他想了多久」。
+        ///
+        /// 注意两者的长度不一样：真实思考只有 3~25 秒，行动倒计时固定 30 秒。
+        /// 如果都按 1:1 递减，倒计时永远走不到 0（最多减到 5），玩家会以为卡住了。
+        /// 所以倒计时按比例折算 —— 思考结束的那一刻，倒计时正好归零。
         /// </summary>
         private System.Collections.IEnumerator ThinkPhase(Seat s, bool refill)
         {
             if (refill && s.ThinkLeft <= 0f)
                 s.ThinkLeft = RollThinkSeconds(_rounds, _stake, _playerRaises > 0);
 
+            var total = Mathf.Max(0.1f, s.ThinkLeft);
+            var turnTotal = s.TurnLeft > 0f ? s.TurnLeft : TurnSeconds;
+
             while (s.ThinkLeft > 0.01f)
             {
                 yield return new WaitForSeconds(0.1f);
 
                 s.ThinkLeft -= 0.1f;
-                s.TurnLeft -= 0.1f;
 
-                // 行动倒计时到 0 也不会强制弃牌 —— 它只是「表演」，
-                // 真实决定由 ThinkLeft 到点触发。但为了合理，卡住时也给个下限。
-                if (s.TurnLeft < 1f) s.TurnLeft = 1f;
+                // 倒计时按「剩余思考 / 总思考」等比缩放
+                var ratio = Mathf.Clamp01(s.ThinkLeft / total);
+                s.TurnLeft = turnTotal * ratio;
 
                 RefreshTable();
             }
+
+            s.TurnLeft = 0f;
         }
 
         private System.Collections.IEnumerator AiPlayOutRoutine()
