@@ -106,9 +106,17 @@ namespace TableGameRoom.Mobile.UI
 
             // 从左往右排，整堆在容器内居中
             var x = -totalW * 0.5f;
-            foreach (var (value, count) in stacks)
+            for (var i = 0; i < stacks.Count; i++)
             {
-                var stack = MakeStack(rt, value, count, scale);
+                var (value, count) = stacks[i];
+
+                // 文字只在**最后一摞**上画总金额。
+                // 之前每摞都写「133×1」，而摞之间重叠 22%，
+                // 三摞的字直接叠成一坨「1×133×133×133」。
+                var showLabel = i == stacks.Count - 1;
+                var stack = MakeStack(rt, value, count, scale, showLabel,
+                    showLabel ? Label(amount) : null);
+
                 stack.anchoredPosition = new Vector2(x, -StackHeight * scale * 0.5f);
                 x += stackW - overlap;
             }
@@ -117,7 +125,10 @@ namespace TableGameRoom.Mobile.UI
         }
 
         /// <summary>创建一摞同面额的筹码（以容器中心为锚）。</summary>
-        private static RectTransform MakeStack(Transform parent, int value, int count, float scale)
+        /// <param name="showLabel">是否在这一摞上写金额</param>
+        /// <param name="labelText">要写的文字（通常只有最右一摞写总额）</param>
+        private static RectTransform MakeStack(Transform parent, int value, int count, float scale,
+            bool showLabel = true, string labelText = null)
         {
             var root = UiFactory.Node(parent, $"Stack{value}");
             var rt = root;
@@ -150,19 +161,20 @@ namespace TableGameRoom.Mobile.UI
 
                 // 面额文字只画在最上面一枚上
                 if (i != visible - 1) continue;
+                if (!showLabel) continue;
 
-                // 数量超过 1 枚时把枚数也带上（如 "100×3"），小尺寸只显示面额
-                var text = stackable && count > 1 ? $"{Label(value)}×{count}" : Label(value);
+                var text = labelText ?? Label(value);
 
                 var label = UiFactory.Label(go.transform, text,
-                    Mathf.Max(11, Mathf.RoundToInt(24f * Mathf.Max(scale, 0.55f))),
+                    Mathf.Max(11, Mathf.RoundToInt(22f * Mathf.Max(scale, 0.55f))),
                     value == 1 ? Color.black : Color.white,
                     TextAnchor.MiddleCenter, bold: true);
 
                 var lr = label.rectTransform;
                 lr.anchorMin = lr.anchorMax = new Vector2(0.5f, 0.5f);
                 lr.pivot = new Vector2(0.5f, 0.5f);
-                lr.sizeDelta = new Vector2(StackWidth * scale, StackHeight * scale * 0.6f);
+                // 文字框略窄于筹码，避免溢出到相邻摞
+                lr.sizeDelta = new Vector2(StackWidth * scale * 0.86f, StackHeight * scale * 0.5f);
                 lr.anchoredPosition = new Vector2(0f, 0f);
             }
 

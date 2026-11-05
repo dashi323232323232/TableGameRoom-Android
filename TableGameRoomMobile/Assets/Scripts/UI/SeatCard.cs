@@ -44,7 +44,8 @@ namespace TableGameRoom.Mobile.UI
             bool looked = false,
             string lastAction = "",
             bool thinking = false,
-            float thinkLeft = 0f)
+            float thinkLeft = 0f,
+            float turnLeft = 0f)
         {
             var root = UiFactory.Node(parent, $"Seat_{name}");
             var rt = root;
@@ -71,24 +72,45 @@ namespace TableGameRoom.Mobile.UI
                 }
             }
 
-            // ---------- 头顶倒计时气泡 ----------
-            // 画在卡片内部左上角（头像正上方），不覆盖名字那一行。
-            // 名字从 textLeft 开始，气泡只占头像那一条竖线的宽度。
+            // ---------- 头顶倒计时 ----------
+            // 两个数字并排，画在卡片**上方外侧**（负 y 越界到卡外），
+            // 这样绝不压名字。卡片在座位层里，溢出部分是可见的。
             if (thinking)
             {
-                var bubble = UiFactory.Card(root,
-                    thinkLeft <= 5f ? Theme.Danger : Theme.Accent, Color.white);
-                var br = bubble.rectTransform;
-                br.anchorMin = br.anchorMax = new Vector2(0f, 1f);
-                br.pivot = new Vector2(0.5f, 1f);
-                br.sizeDelta = new Vector2(46f, 22f);
-                // 正对头像中线，紧贴卡片顶部
-                br.anchoredPosition = new Vector2(6f + AvatarSize * 0.5f, -1f);
+                var thinkRow = UiFactory.Node(root, "ThinkRow");
+                var tr = thinkRow;
+                tr.anchorMin = tr.anchorMax = new Vector2(0.5f, 1f);
+                tr.pivot = new Vector2(0.5f, 0f);
+                tr.sizeDelta = new Vector2(76f, 20f);
+                // 往上顶出卡片外 22px
+                tr.anchoredPosition = new Vector2(0f, 22f);
 
-                var secs = UiFactory.Label(bubble.transform,
-                    Mathf.CeilToInt(Mathf.Max(0f, thinkLeft)).ToString(),
-                    15, Color.white, TextAnchor.MiddleCenter, bold: true);
-                UiFactory.Fill(secs.rectTransform);
+                // 行动倒计时（30 秒）
+                var turn = UiFactory.Card(thinkRow,
+                    turnLeft <= 5f ? Theme.Danger : Theme.Accent, Color.white);
+                var trr = turn.rectTransform;
+                trr.anchorMin = trr.anchorMax = new Vector2(0f, 1f);
+                trr.pivot = new Vector2(0f, 1f);
+                trr.sizeDelta = new Vector2(38f, 20f);
+                trr.anchoredPosition = Vector2.zero;
+
+                var turnText = UiFactory.Label(turn.transform,
+                    Mathf.CeilToInt(Mathf.Max(0f, turnLeft)).ToString(),
+                    14, Color.white, TextAnchor.MiddleCenter, bold: true);
+                UiFactory.Fill(turnText.rectTransform);
+
+                // 真实思考剩余
+                var think = UiFactory.Card(thinkRow, Theme.Hex("#E8EDF0"), Theme.Muted);
+                var thr = think.rectTransform;
+                thr.anchorMin = thr.anchorMax = new Vector2(0f, 1f);
+                thr.pivot = new Vector2(0f, 1f);
+                thr.sizeDelta = new Vector2(34f, 20f);
+                thr.anchoredPosition = new Vector2(40f, 0f);
+
+                var thinkText = UiFactory.Label(think.transform,
+                    $"{Mathf.CeilToInt(Mathf.Max(0f, thinkLeft))}s",
+                    12, Theme.Muted, TextAnchor.MiddleCenter, bold: true);
+                UiFactory.Fill(thinkText.rectTransform);
             }
 
             // ---------- 左侧头像 ----------
@@ -195,8 +217,11 @@ namespace TableGameRoom.Mobile.UI
             go.transform.SetParent(parent, false);
 
             var img = go.GetComponent<Image>();
-            img.sprite = UiFactory.RoundSprite;
+            // 用专门的「扑克牌」圆角精灵，圆角比通用卡片小得多，
+            // 否则 26×36 的小牌会圆成一个药丸，看不出是牌。
+            img.sprite = UiFactory.CardSprite;
             img.type = Image.Type.Sliced;
+            img.pixelsPerUnitMultiplier = 1.6f;
             img.color = hidden ? Theme.Accent : Theme.CardFace;
             img.raycastTarget = false;
 

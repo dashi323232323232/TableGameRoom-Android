@@ -20,8 +20,8 @@ namespace TableGameRoom.Mobile
         private const string ApkName = "TableGameRoom.apk";
 
         /// <summary>版本号（发布时改这两行）。</summary>
-        public const string AppVersion = "1.31";
-        public const int AppVersionCode = 131;
+        public const string AppVersion = "1.32";
+        public const int AppVersionCode = 132;
 
         // 外部工具链路径（安装目录无写权限，工具链放在 D 盘）
         private static string ToolchainRoot =>

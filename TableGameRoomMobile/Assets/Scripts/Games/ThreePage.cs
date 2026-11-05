@@ -28,10 +28,20 @@ namespace TableGameRoom.Mobile.Games
             /// <summary>本轮具体做了什么，如「加注 $200」。</summary>
             public string LastAction = "";
 
-            /// <summary>是否正在思考（头顶显示倒计时）。</summary>
-            public bool Thinking;
-            public float ThinkSeconds;
+            /// <summary>
+            /// 行动倒计时（30 秒，像真人坐在那儿考虑）。
+            /// 和「真实思考时间」是两回事：这个一直显示，让玩家看到「他还有多少时间做决定」。
+            /// </summary>
+            public float TurnLeft;
+
+            /// <summary>
+            /// 真实思考剩余时间（3~25 秒，随压力增长）。
+            /// 到点才真正做决定。看牌后会重置这个值，再想一轮。
+            /// </summary>
             public float ThinkLeft;
+
+            /// <summary>是否正在思考（显示倒计时气泡）。</summary>
+            public bool Thinking;
         }
 
         private App _app;
@@ -237,23 +247,25 @@ namespace TableGameRoom.Mobile.Games
 
                 // 跟注金额随规则变化，按钮上直接写清楚
                 var callCost = CallCost;
-                var callTag = !_playerLooked ? "闷牌" : _playerCallCount == 0 ? "看牌 3×" : "2×";
+                var callTag = !_playerLooked ? "闷" : _playerCallCount == 0 ? "看3×" : "2×";
                 buttons.Add(UiFactory.Button(_actionHost,
-                    $"跟注 ${callCost:N0}（{callTag}）", () => PlayerAct(1)));
+                    $"跟 ${callCost:N0}（{callTag}）", () => PlayerAct(1)));
 
-                buttons.Add(UiFactory.Primary(_actionHost, "加注…", ChooseRaise));
+                buttons.Add(UiFactory.Primary(_actionHost, "加注", ChooseRaise));
                 buttons.Add(UiFactory.Button(_actionHost, "比牌", Compare));
                 buttons.Add(UiFactory.Button(_actionHost, "弃牌", () => PlayerAct(0)));
             }
 
             if (buttons.Count == 0) return;
 
-            const float gap = 10f;
+            // 按可用宽度均分，不要写死上限 —— 否则 5 个按钮放不下，
+            // 每个都会被压窄导致文字截断。
+            const float gap = 8f;
             var totalWidth = _actionHost.rect.width;
             if (totalWidth <= 1f) totalWidth = 1000f;
 
             var count = buttons.Count;
-            var btnWidth = Mathf.Min(260f, (totalWidth - gap * (count - 1)) / count);
+            var btnWidth = (totalWidth - gap * (count - 1)) / count;
 
             for (var i = 0; i < count; i++)
             {
@@ -262,6 +274,11 @@ namespace TableGameRoom.Mobile.Games
                 rt.pivot = new Vector2(0f, 0.5f);
                 rt.sizeDelta = new Vector2(btnWidth, 100f);
                 rt.anchoredPosition = new Vector2(i * (btnWidth + gap), 0f);
+
+                // 按钮文字随宽度自适应缩小，避免被截断
+                var label = rt.GetComponentInChildren<Text>();
+                if (label != null)
+                    label.fontSize = Mathf.Clamp(Mathf.RoundToInt(btnWidth * 0.12f), 20, 30);
             }
         }
 
@@ -377,41 +394,83 @@ namespace TableGameRoom.Mobile.Games
 
         /// <summary>
         /// 选择加注倍数。
-        /// 之前只有「加注 2×」一个按钮，没法下 2.5 倍或 3 倍。
-        /// 这里弹出常用倍数，每项直接标出实际金额。
+        ///
+        /// 规则：最低 1.5 倍，往上可以自己填任意数字。
+        /// 快捷选项给常用倍数，另有「自定义金额」直接输入。
         /// </summary>
         private void ChooseRaise()
         {
             if (!_inRound || _showdown || _playerFolded) return;
 
             var baseCost = RaiseBase;
-            var multipliers = new[] { 2f, 2.5f, 3f, 4f, 5f };
+            var minCost = Mathf.CeilToInt(baseCost * MinRaiseMultiplier);
 
             var options = new List<string>();
             var costs = new List<int>();
 
-            foreach (var m in multipliers)
+            // 常用倍数：1.5 / 2 / 2.5 / 3 / 4 / 5
+            foreach (var m in new[] { 1.5f, 2f, 2.5f, 3f, 4f, 5f })
             {
                 var cost = Mathf.RoundToInt(baseCost * m);
-                if (cost <= 0) continue;
-
+                if (cost < minCost) continue;
                 if (_app.Tier.Max is int cap && cost > cap) continue;
 
                 options.Add($"{m:0.#} 倍 · ${cost:N0}");
                 costs.Add(cost);
             }
 
-            if (options.Count == 0)
-            {
-                _app.Msg("当前档位下没有可用的加注倍数。", "无法加注");
-                return;
-            }
+            options.Add($"自定义金额（最低 ${minCost:N0}）");
+            costs.Add(-1);   // 标记：走自定义输入
 
             Dialog.Pick(_app.CanvasRoot,
-                $"选择加注倍数（基准 ${baseCost:N0}）", options, 0, index =>
+                $"选择加注金额（基准 ${baseCost:N0}，最低 {MinRaiseMultiplier:0.#} 倍）",
+                options, 0, index =>
                 {
                     if (index < 0 || index >= costs.Count) return;
+
+                    if (costs[index] < 0)
+                    {
+                        PromptCustomRaise(minCost);
+                        return;
+                    }
+
                     PlayerActRaise(costs[index]);
+                });
+        }
+
+        /// <summary>最低加注倍数。</summary>
+        private const float MinRaiseMultiplier = 1.5f;
+
+        /// <summary>弹输入框让玩家自己填加注金额。</summary>
+        private void PromptCustomRaise(int minCost)
+        {
+            var cap = _app.Tier.Max ?? int.MaxValue;
+            var capText = _app.Tier.Max is int c ? $"${c:N0}" : "无上限";
+
+            Dialog.Input(_app.CanvasRoot, "自定义加注金额",
+                $"请输入金额（最低 ${minCost:N0}，档位上限 {capText}）",
+                minCost.ToString(),
+                text =>
+                {
+                    if (!int.TryParse(text?.Trim(), out var amount))
+                    {
+                        _app.Msg("请输入有效的整数金额。", "输入有误");
+                        return;
+                    }
+
+                    if (amount < minCost)
+                    {
+                        _app.Msg($"加注金额不能低于 ${minCost:N0}（{MinRaiseMultiplier:0.#} 倍）。", "金额过低");
+                        return;
+                    }
+
+                    if (amount > cap)
+                    {
+                        _app.Msg($"超过档位单次上限 ${cap:N0}。", "金额过高");
+                        return;
+                    }
+
+                    PlayerActRaise(amount);
                 });
         }
 
@@ -513,17 +572,71 @@ namespace TableGameRoom.Mobile.Games
         }
 
         /// <summary>
-        /// 电脑逐个行动。
+        /// 电脑逐个行动，模拟真人的两段式思考。
         ///
-        /// 之前是一次性把所有 AI 算完，玩家看到的就是「瞬间全变」，
-        /// 没有任何思考过程。现在每个座位依次：
-        ///   1. 头顶显示倒计时（按档位和注额算，和桌面版 ThinkTiming 一致）
-        ///   2. 倒计时结束才出结果
-        ///   3. 立刻重绘，玩家能看到它跟了多少 / 加了多少 / 弃牌
+        /// 每位 AI 有两套时间：
+        ///   1. **行动倒计时**（30 秒，固定在头顶显示）：像真人坐在那儿，还有多少时间做决定。
+        ///   2. **真实思考时间**（3~25 秒，随压力增长）：到点才真正做决定。
+        ///
+        /// 流程：
+        ///   思考 → 决定看牌 → 看完**重置思考时间**再想一轮 → 决定跟/加/弃
+        ///
+        /// 这样玩家看到的就是「对面先犹豫、翻牌看一眼、又想了半天才加注」，
+        /// 而不是一瞬间全员出结果。
         /// </summary>
         private void AiPlayOut()
         {
             StartCoroutine(AiPlayOutRoutine());
+        }
+
+        /// <summary>行动倒计时总长（秒）。</summary>
+        private const float TurnSeconds = 30f;
+
+        /// <summary>
+        /// 真实思考时间：3~25 秒，压力越大越久。
+        /// 压力来自：轮次（越往后越紧张）+ 注额相对档位上限的比例 + 是否被加注。
+        /// </summary>
+        private float RollThinkSeconds(int round, int stake, bool pressured)
+        {
+            var roundPressure = Mathf.Clamp01(round / 6f);
+            var stakePressure = _app.Tier.Max is int cap && cap > 0
+                ? Mathf.Clamp01((float)stake / cap)
+                : Mathf.Clamp01(Mathf.Log10(Mathf.Max(1, stake)) / 6f);
+
+            var pressure = roundPressure * 0.5f + stakePressure * 0.5f;
+            if (pressured) pressure = Mathf.Min(1f, pressure + 0.2f);
+
+            // 3 秒打底，最高 25 秒
+            var seconds = Mathf.Lerp(3f, 25f, pressure);
+
+            // ±25% 随机波动，避免节奏呆板
+            seconds *= UnityEngine.Random.Range(0.75f, 1.25f);
+
+            return Mathf.Clamp(seconds, 3f, 25f);
+        }
+
+        /// <summary>
+        /// 跑一段思考过程：真实思考时间递减，同时 30 秒行动倒计时也在走。
+        /// 两个数字都会显示，玩家能看到「他还有多少时间」和「他想了多久」。
+        /// </summary>
+        private System.Collections.IEnumerator ThinkPhase(Seat s, bool refill)
+        {
+            if (refill && s.ThinkLeft <= 0f)
+                s.ThinkLeft = RollThinkSeconds(_rounds, _stake, _playerRaises > 0);
+
+            while (s.ThinkLeft > 0.01f)
+            {
+                yield return new WaitForSeconds(0.1f);
+
+                s.ThinkLeft -= 0.1f;
+                s.TurnLeft -= 0.1f;
+
+                // 行动倒计时到 0 也不会强制弃牌 —— 它只是「表演」，
+                // 真实决定由 ThinkLeft 到点触发。但为了合理，卡住时也给个下限。
+                if (s.TurnLeft < 1f) s.TurnLeft = 1f;
+
+                RefreshTable();
+            }
         }
 
         private System.Collections.IEnumerator AiPlayOutRoutine()
@@ -534,22 +647,31 @@ namespace TableGameRoom.Mobile.Games
             {
                 if (s.Folded) continue;
 
-                // 高亮当前行动的座位
+                // ---------- 开始行动：亮出 30 秒倒计时 ----------
                 _currentSeatName = s.Name;
                 s.Thinking = true;
-                s.ThinkSeconds = ThinkTiming.Delay(4, _stake, _app.Tier.Max) / 1000f;
-                s.ThinkLeft = s.ThinkSeconds;
+                s.TurnLeft = TurnSeconds;
+                s.ThinkLeft = RollThinkSeconds(_rounds, _stake, _playerRaises > 0);
                 RefreshTable();
 
-                // 逐秒倒数
-                while (s.ThinkLeft > 0.01f)
+                // ---------- 第一段：思考要不要看牌 ----------
+                yield return ThinkPhase(s, refill: false);
+
+                // ---------- 决定看牌 ----------
+                if (!s.Profile.Looked && _rng.NextDouble() < 0.7)
                 {
-                    yield return new WaitForSeconds(0.1f);
-                    s.ThinkLeft -= 0.1f;
+                    s.Profile.Looked = true;
+                    s.LastAction = "看牌";
                     RefreshTable();
+
+                    // 看完牌重置思考时间，再想一轮（真人也是看完再算）
+                    s.ThinkLeft = RollThinkSeconds(_rounds, _stake, _playerRaises > 0);
+                    yield return ThinkPhase(s, refill: true);
                 }
 
+                // ---------- 第二段结束，正式做决定 ----------
                 s.Thinking = false;
+                s.TurnLeft = 0f;
                 s.ThinkLeft = 0f;
                 _currentSeatName = "";
 
@@ -565,17 +687,14 @@ namespace TableGameRoom.Mobile.Games
                     s.Folded = true;
                     s.Status = "弃牌";
                     s.Emoji = "😞";
+                    s.LastAction = "已弃牌";
                     _log += $" {s.Name} 弃牌。";
                     RefreshTable();
+                    yield return new WaitForSeconds(0.3f);
                     continue;
                 }
 
-                // 记录「这位 AI 已经陪玩家跟了几轮」
                 s.Profile.DecisionsUsed++;
-
-                // 看牌：跟过一轮后大部分 AI 会看，看牌后才能加注/比牌
-                if (!s.Profile.Looked && (s.Profile.DecisionsUsed >= 1 || _rng.NextDouble() < 0.5))
-                    s.Profile.Looked = true;
 
                 if (_ai.Raises(ctx, s.Profile))
                 {
@@ -596,9 +715,8 @@ namespace TableGameRoom.Mobile.Games
                     s.LastAction = $"跟注 ${_stake:N0}";
                 }
 
-                // 每位行动完立刻重绘
                 RefreshTable();
-                yield return new WaitForSeconds(0.15f);
+                yield return new WaitForSeconds(0.3f);
             }
 
             var alive = _seats.Count(s => !s.Folded);
@@ -743,7 +861,8 @@ namespace TableGameRoom.Mobile.Games
                         looked: s.Profile.Looked,
                         lastAction: s.LastAction,
                         thinking: s.Thinking,
-                        thinkLeft: s.ThinkLeft);
+                        thinkLeft: s.ThinkLeft,
+                        turnLeft: s.TurnLeft);
 
                     var cr = card;
                     cr.anchorMin = cr.anchorMax = new Vector2(0.5f, 0.5f);

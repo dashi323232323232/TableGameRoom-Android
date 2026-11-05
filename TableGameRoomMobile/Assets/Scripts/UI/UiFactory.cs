@@ -80,6 +80,54 @@ namespace TableGameRoom.Mobile.UI
             }
         }
 
+        private static Sprite _cardSprite;
+
+        /// <summary>
+        /// 扑克牌专用的圆角矩形（9-slice）。
+        ///
+        /// 通用 RoundSprite 的圆角是 18/64 ≈ 28%，画在 26×36 的小牌上会圆成药丸，
+        /// 完全看不出是张牌。这里把圆角压到 8/64 ≈ 12%，就是真实扑克牌那种小圆角。
+        /// </summary>
+        public static Sprite CardSprite
+        {
+            get
+            {
+                if (_cardSprite != null) return _cardSprite;
+
+                const int size = 64;
+                // 圆角 6/64 ≈ 9%，接近真实扑克牌的圆角。
+                // 之前的通用卡片是 18/64 ≈ 28%，小尺寸下会圆成药丸。
+                const int radius = 6;
+                var tex = new Texture2D(size, size, TextureFormat.RGBA32, false)
+                {
+                    filterMode = FilterMode.Bilinear,
+                    wrapMode = TextureWrapMode.Clamp
+                };
+
+                var px = new Color32[size * size];
+                for (var y = 0; y < size; y++)
+                {
+                    for (var x = 0; x < size; x++)
+                    {
+                        var cx = Mathf.Clamp(x, radius, size - 1 - radius);
+                        var cy = Mathf.Clamp(y, radius, size - 1 - radius);
+                        var dx = x - cx;
+                        var dy = y - cy;
+                        var dist = Mathf.Sqrt(dx * dx + dy * dy);
+                        var a = Mathf.Clamp01(radius - dist + 0.5f);
+                        px[y * size + x] = new Color32(255, 255, 255, (byte)(a * 255));
+                    }
+                }
+
+                tex.SetPixels32(px);
+                tex.Apply();
+
+                _cardSprite = Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f),
+                    100f, 0, SpriteMeshType.FullRect, new Vector4(radius, radius, radius, radius));
+                return _cardSprite;
+            }
+        }
+
         /// <summary>实心圆。</summary>
         public static Sprite CircleSprite
         {

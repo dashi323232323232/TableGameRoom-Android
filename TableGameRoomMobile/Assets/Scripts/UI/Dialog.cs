@@ -54,6 +54,80 @@ namespace TableGameRoom.Mobile.UI
             return dlg;
         }
 
+        // ==================== 文本输入 ====================
+
+        /// <summary>
+        /// 显示输入框，确认后回调输入的文字。
+        /// 用于「自定义加注金额」这类需要玩家自己填数字的场景。
+        /// </summary>
+        public static Dialog Input(
+            Transform canvas,
+            string title,
+            string hint,
+            string initial,
+            Action<string> onConfirm)
+        {
+            var dlg = Create(canvas);
+            dlg._onCancel = null;
+
+            var stack = dlg.BuildFrame(canvas, title);
+
+            if (!string.IsNullOrEmpty(hint))
+                stack.Text(hint, Theme.FontSmall, Theme.Muted);
+
+            // 输入框本体
+            var fieldGo = new GameObject("InputField",
+                typeof(RectTransform), typeof(CanvasRenderer), typeof(Image), typeof(InputField));
+            fieldGo.transform.SetParent(dlg.BodyHost, false);
+
+            var fieldBg = fieldGo.GetComponent<Image>();
+            fieldBg.sprite = UiFactory.RoundSprite;
+            fieldBg.type = Image.Type.Sliced;
+            fieldBg.color = Theme.Surface;
+
+            var fieldRect = (RectTransform)fieldGo.transform;
+
+            // 文本
+            var textGo = new GameObject("Text", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text));
+            textGo.transform.SetParent(fieldGo.transform, false);
+            var text = textGo.GetComponent<Text>();
+            text.font = UiFactory.Font;
+            text.fontSize = Theme.FontBody;
+            text.color = Theme.Ink;
+            text.alignment = TextAnchor.MiddleLeft;
+            text.supportRichText = false;
+            text.horizontalOverflow = HorizontalWrapMode.Overflow;
+            var tr = textGo.GetComponent<RectTransform>();
+            tr.anchorMin = Vector2.zero;
+            tr.anchorMax = Vector2.one;
+            tr.offsetMin = new Vector2(20f, 6f);
+            tr.offsetMax = new Vector2(-20f, -6f);
+
+            var input = fieldGo.GetComponent<InputField>();
+            input.textComponent = text;
+            input.targetGraphic = fieldBg;
+            input.contentType = InputField.ContentType.IntegerNumber;
+            input.lineType = InputField.LineType.SingleLine;
+            input.text = initial ?? "";
+
+            stack.Add(fieldRect, Theme.ButtonHeight + 6f);
+
+            var buttons = new List<Button>
+            {
+                UiFactory.Button(dlg.BodyHost, "取消", dlg.Close),
+                UiFactory.Primary(dlg.BodyHost, "确定", () =>
+                {
+                    var value = input.text;
+                    dlg.Close();
+                    onConfirm?.Invoke(value);
+                })
+            };
+            stack.RowOf(buttons, Theme.ButtonHeight);
+
+            dlg.Commit();
+            return dlg;
+        }
+
         // ==================== 单选列表 ====================
 
         /// <summary>显示选项列表，选中后回调。</summary>
