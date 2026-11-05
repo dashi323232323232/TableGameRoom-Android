@@ -393,10 +393,11 @@ namespace TableGameRoom.Mobile.Games
         private int RaiseBase => CallCost;
 
         /// <summary>
-        /// 选择加注倍数。
+        /// 加注：直接弹输入框让玩家填金额。
         ///
-        /// 规则：最低 1.5 倍，往上可以自己填任意数字。
-        /// 快捷选项给常用倍数，另有「自定义金额」直接输入。
+        /// 之前给了一堆快捷倍数（1.5/2/2.5/3…），但既然能自己填，
+        /// 那些选项就是多余的 —— 直接输入更快也更自由。
+        /// 只保留最低 1.5 倍和档位上限的校验。
         /// </summary>
         private void ChooseRaise()
         {
@@ -405,37 +406,7 @@ namespace TableGameRoom.Mobile.Games
             var baseCost = RaiseBase;
             var minCost = Mathf.CeilToInt(baseCost * MinRaiseMultiplier);
 
-            var options = new List<string>();
-            var costs = new List<int>();
-
-            // 常用倍数：1.5 / 2 / 2.5 / 3 / 4 / 5
-            foreach (var m in new[] { 1.5f, 2f, 2.5f, 3f, 4f, 5f })
-            {
-                var cost = Mathf.RoundToInt(baseCost * m);
-                if (cost < minCost) continue;
-                if (_app.Tier.Max is int cap && cost > cap) continue;
-
-                options.Add($"{m:0.#} 倍 · ${cost:N0}");
-                costs.Add(cost);
-            }
-
-            options.Add($"自定义金额（最低 ${minCost:N0}）");
-            costs.Add(-1);   // 标记：走自定义输入
-
-            Dialog.Pick(_app.CanvasRoot,
-                $"选择加注金额（基准 ${baseCost:N0}，最低 {MinRaiseMultiplier:0.#} 倍）",
-                options, 0, index =>
-                {
-                    if (index < 0 || index >= costs.Count) return;
-
-                    if (costs[index] < 0)
-                    {
-                        PromptCustomRaise(minCost);
-                        return;
-                    }
-
-                    PlayerActRaise(costs[index]);
-                });
+            PromptCustomRaise(minCost);
         }
 
         /// <summary>最低加注倍数。</summary>
@@ -446,9 +417,10 @@ namespace TableGameRoom.Mobile.Games
         {
             var cap = _app.Tier.Max ?? int.MaxValue;
             var capText = _app.Tier.Max is int c ? $"${c:N0}" : "无上限";
+            var baseCost = RaiseBase;
 
-            Dialog.Input(_app.CanvasRoot, "自定义加注金额",
-                $"请输入金额（最低 ${minCost:N0}，档位上限 {capText}）",
+            Dialog.Input(_app.CanvasRoot, "加注金额",
+                $"跟注额 ${baseCost:N0}　最低 ${minCost:N0}（{MinRaiseMultiplier:0.#} 倍）　上限 {capText}",
                 minCost.ToString(),
                 text =>
                 {
