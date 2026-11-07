@@ -22,8 +22,14 @@ namespace TableGameRoom.Mobile.Games
             public bool Folded;
             public ThreeAiProfile Profile = new ThreeAiProfile();
             public string Status = "等待";
-            public string Emoji = "😐";
             public string Result = "";
+
+            /// <summary>当前表情，由 MoodEngine 按牌局状态计算，不再用 emoji 字符。</summary>
+            public AvatarVisual.Mood Mood = AvatarVisual.Mood.Neutral;
+
+            /// <summary>刚比赢 / 比输（表情优先级最高）。</summary>
+            public bool JustWon;
+            public bool JustLost;
 
             /// <summary>本轮具体做了什么，如「加注 $200」。</summary>
             public string LastAction = "";
@@ -47,10 +53,6 @@ namespace TableGameRoom.Mobile.Games
         private App _app;
         private ThreeAiEngine _ai;
 
-        /// <summary>表情池 —— 与桌面版 Three.cs 一致。</summary>
-        private static readonly string[] Emojis = { "😐", "😄", "😞", "😠" };
-
-        private string _playerEmoji = "😐";
         private readonly System.Random _rng = new System.Random();
 
         private readonly List<Seat> _seats = new List<Seat>();
@@ -326,7 +328,8 @@ namespace TableGameRoom.Mobile.Games
                 var seat = new Seat
                 {
                     Name = $"电脑 {i + 1}",
-                    Emoji = Emojis[_rng.Next(Emojis.Length)],
+                    // 开局一律平静，之后由 RefreshMoods() 按真实牌局状态更新
+                    Mood = AvatarVisual.Mood.Neutral,
                     Profile = new ThreeAiProfile
                     {
                         EffectiveTier = tierIndex + 1,
@@ -364,6 +367,40 @@ namespace TableGameRoom.Mobile.Games
 
             RefreshTable();
             BuildActions();
+        }
+
+        /// <summary>
+        /// 按当前牌局状态刷新所有 AI 的表情。
+        /// 玩家自己没有表情 —— 表情是给 AI 用的，用来表现「他现在的处境」。
+        /// </summary>
+        private void RefreshMoods()
+        {
+            var tierIndex = _app.TierIndex;
+            var tierStrength = (float)AiTuning.Strength(tierIndex);
+
+            // 全局压力：轮次进度 + 底池相对档位上限
+            var roundPressure = Mathf.Clamp01(_rounds / 5f);
+            var potPressure = _app.Tier.Max is int cap && cap > 0
+                ? Mathf.Clamp01((float)_pot / (cap * 4f))
+                : 0.5f;
+
+            foreach (var s in _seats)
+            {
+                // 每个座位有自己的牌力和处境
+                var score = ThreeScore.Of(s.Cards);
+                var category = s.Cards.Count >= 3 ? (int)(score / 1_000_000L) : 0;
+
+                var seatPressure = Mathf.Clamp01(
+                    roundPressure * 0.4f + potPressure * 0.3f + (s.Committed > _stake ? 0.3f : 0f));
+
+                s.Mood = MoodEngine.ForThree(
+                    category, tierStrength, seatPressure,
+                    s.Folded, s.JustWon, s.JustLost, s.Profile.Looked, _rng);
+
+                // 结果只亮一帧，避免一直挂着
+                s.JustWon = false;
+                s.JustLost = false;
+            }
         }
 
         private void Look()
@@ -535,15 +572,13 @@ namespace TableGameRoom.Mobile.Games
             {
                 target.Folded = true;
                 target.Status = "比牌输";
-                target.Emoji = "😞";
-                _playerEmoji = "😄";
+                target.JustLost = true;
                 _log = $"比牌：你的{ThreeScore.Name(mine)} 胜过 {target.Name} 的{ThreeScore.Name(theirs)}";
             }
             else
             {
                 _playerFolded = true;
-                _playerEmoji = "😞";
-                target.Emoji = "😄";
+                target.JustWon = true;
                 _log = $"比牌：你的{ThreeScore.Name(mine)} 输给 {target.Name} 的{ThreeScore.Name(theirs)}";
             }
 
@@ -719,7 +754,6 @@ namespace TableGameRoom.Mobile.Games
                 {
                     s.Folded = true;
                     s.Status = "弃牌";
-                    s.Emoji = "😞";
                     s.LastAction = "已弃牌";
                     _log += $" {s.Name} 弃牌。";
                     RefreshTable();
@@ -747,7 +781,6 @@ namespace TableGameRoom.Mobile.Games
                     _stake = Mathf.Max(_stake, cost);
 
                     s.Status = "加注";
-                    s.Emoji = "😄";
                     s.LastAction = $"加注 ${cost:N0}";
                     _log += $" {s.Name} 加注 ${cost:N0}。";
                 }
@@ -757,7 +790,6 @@ namespace TableGameRoom.Mobile.Games
                     _pot += seatCall;
                     s.Profile.CallCount++;
                     s.Status = "跟注";
-                    s.Emoji = "😐";
                     s.LastAction = $"跟注 ${seatCall:N0}";
                 }
 
@@ -881,6 +913,9 @@ namespace TableGameRoom.Mobile.Games
                 : _playerLooked ? $"已看牌：{ThreeScore.Name(ThreeScore.Of(_player))}"
                 : "未看牌";
 
+            // 先按当前牌局状态刷新所有 AI 的表情，再重绘座位
+            RefreshMoods();
+
             UiFactory.Clear(_seatsHost);
             var seatCount = _seats.Count;
 
@@ -901,7 +936,7 @@ namespace TableGameRoom.Mobile.Games
 
                     var card = SeatCard.Create(
                         _seatsHost,
-                        s.Name, s.Emoji, i,
+                        s.Name, s.Mood, i,
                         s.Status, s.Committed, s.Folded, isCurrent,
                         s.Result, s.Cards, hidden: !_showdown,
                         looked: s.Profile.Looked,
@@ -929,13 +964,16 @@ namespace TableGameRoom.Mobile.Games
             }
             else
             {
-                // 头像（左侧）
-                var avatar = AvatarVisual.Create(_playerHost, "你", _playerEmoji, 0,
-                    isPlayer: true, size: 52f);
-                var avr = avatar;
-                avr.anchorMin = avr.anchorMax = new Vector2(0f, 0.5f);
-                avr.pivot = new Vector2(0f, 0.5f);
-                avr.anchoredPosition = new Vector2(2f, 0f);
+                // 玩家自己**不显示头像和表情** —— 表情是给 AI 用的，
+                // 用来表现「他现在的处境」；你自己的脸不需要系统替你演。
+                // 这里只留一个「你」的标签，标明这一手牌是谁的。
+                var me = UiFactory.Label(_playerHost, "你", Theme.FontSmall, Theme.Muted,
+                    TextAnchor.MiddleCenter, bold: true);
+                var mer = me.rectTransform;
+                mer.anchorMin = mer.anchorMax = new Vector2(0f, 0.5f);
+                mer.pivot = new Vector2(0f, 0.5f);
+                mer.sizeDelta = new Vector2(44f, 40f);
+                mer.anchoredPosition = new Vector2(2f, 0f);
 
                 var show = _playerLooked || _showdown;
                 LayoutRow(_playerHost, _player.Count, 56f, 6f,

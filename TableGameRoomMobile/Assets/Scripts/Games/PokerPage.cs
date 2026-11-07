@@ -22,17 +22,17 @@ namespace TableGameRoom.Mobile.Games
             public bool Folded;
             public PokerAiProfile Profile = new PokerAiProfile();
             public string Status = "等待";
-            public string Emoji = "😐";
             public string Result = "";
+
+            /// <summary>当前表情，由 MoodEngine 按牌局状态计算。</summary>
+            public AvatarVisual.Mood Mood = AvatarVisual.Mood.Neutral;
+
+            /// <summary>刚赢 / 刚输（表情优先级最高）。</summary>
+            public bool JustWon;
+            public bool JustLost;
         }
 
         private static readonly string[] StageNames = { "翻牌前", "翻牌", "转牌", "河牌" };
-
-        /// <summary>表情池 —— 与桌面版 Poker.cs 一致。</summary>
-        private static readonly string[] Emojis = { "😐", "😄", "😞", "😠" };
-
-        /// <summary>玩家自己的表情。</summary>
-        private string _playerEmoji = "😐";
 
         private readonly System.Random _rng = new System.Random();
 
@@ -307,7 +307,8 @@ namespace TableGameRoom.Mobile.Games
                 var seat = new Seat
                 {
                     Name = $"电脑 {i + 1}",
-                    Emoji = Emojis[_rng.Next(Emojis.Length)],
+                    // 开局平静，之后由 RefreshMoods() 按真实牌局状态更新
+                    Mood = AvatarVisual.Mood.Neutral,
                     Profile = new PokerAiProfile
                     {
                         EffectiveTier = tierIndex + 1,
@@ -394,7 +395,6 @@ namespace TableGameRoom.Mobile.Games
                 {
                     s.Folded = true;
                     s.Status = "弃牌";
-                    s.Emoji = "😞";
                     _log += $" {s.Name} 弃牌。";
                     continue;
                 }
@@ -405,7 +405,6 @@ namespace TableGameRoom.Mobile.Games
                     s.Committed += cost;
                     _pot += cost;
                     s.Status = "加注";
-                    s.Emoji = "😄";
                     _log += $" {s.Name} 加注 ${cost:N0}。";
                 }
                 else
@@ -413,7 +412,6 @@ namespace TableGameRoom.Mobile.Games
                     s.Committed += _stake;
                     _pot += _stake;
                     s.Status = "跟注";
-                    s.Emoji = "😐";
                 }
             }
 
@@ -525,11 +523,51 @@ namespace TableGameRoom.Mobile.Games
 
         // ==================== 渲染 ====================
 
+        /// <summary>
+        /// 按当前牌局状态刷新所有 AI 的表情。
+        /// 玩家自己没有表情 —— 表情只用于表现 AI 的处境。
+        /// </summary>
+        private void RefreshMoods()
+        {
+            var tierIndex = _app.TierIndex;
+            var tierStrength = (float)AiTuning.Strength(tierIndex);
+
+            foreach (var s in _seats)
+            {
+                // 用真实牌型 + 胜率估算来定表情
+                var category = 0;
+                var equity = 0.5;
+
+                if (s.Hole.Count >= 2 && _community.Count >= 3)
+                {
+                    var score = FastPokerScore.Best(s.Hole.Concat(_community).ToArray());
+                    category = (int)(score / 100_000_000_000L);
+                    equity = category / 8.0;
+                }
+                else if (s.Hole.Count >= 2)
+                {
+                    // 翻牌前：看底牌大小
+                    var high = s.Hole.Max(c => c.Rank);
+                    equity = (high - 2) / 12.0 * 0.6;
+                }
+
+                s.Mood = MoodEngine.ForPoker(
+                    category, equity, tierStrength,
+                    s.Folded, s.JustWon, s.JustLost, _rng);
+
+                s.JustWon = false;
+                s.JustLost = false;
+            }
+        }
+
         private void RefreshTable()
         {
             _stageText.text = _showdown ? "摊牌" : StageNames[Mathf.Clamp(_stage, 0, 3)];
             _potText.text = $"底池 ${_pot:N0}";
             _resultText.text = "";
+
+            // 先按当前牌局状态刷新所有 AI 的表情
+            RefreshMoods();
 
             // 底池筹码堆
             UiFactory.Clear(_potChipsHost);
@@ -566,7 +604,7 @@ namespace TableGameRoom.Mobile.Games
 
                     var card = SeatCard.Create(
                         _seatsHost,
-                        s.Name, s.Emoji, i,
+                        s.Name, s.Mood, i,
                         s.Status, s.Committed, s.Folded, isCurrent,
                         s.Result, s.Hole, hidden: !_showdown);
 
@@ -590,29 +628,30 @@ namespace TableGameRoom.Mobile.Games
             }
             else
             {
-                // 整组内容水平居中：头像 + 手牌 + 筹码
-                // 尺寸按桌面版等比例缩：自己的牌比公共牌略大一点点，但不压牌桌
-                const float avatarSize = 46f;
+                // 玩家自己**不显示头像和表情** —— 表情是给 AI 用的。
+                // 这里只放一个「你」的标签 + 手牌 + 筹码。
+                const float labelW = 40f;
                 const float cardW = 64f;
                 const float cardH = 90f;
                 const float gap = 5f;
 
                 var cardsW = _player.Count * cardW + (_player.Count - 1) * gap;
                 var chipsW = _playerCommitted > 0 ? 56f : 0f;
-                var totalW = avatarSize + 6f + cardsW + (chipsW > 0 ? 6f + chipsW : 0f);
+                var totalW = labelW + 6f + cardsW + (chipsW > 0 ? 6f + chipsW : 0f);
 
                 var startX = -totalW * 0.5f;
 
-                // 头像
-                var avatar = AvatarVisual.Create(_playerHost, "你", _playerEmoji, 0,
-                    isPlayer: true, size: avatarSize);
-                var avr = avatar;
+                // 「你」的标签
+                var me = UiFactory.Label(_playerHost, "你", Theme.FontSmall, Theme.Muted,
+                    TextAnchor.MiddleCenter, bold: true);
+                var avr = me.rectTransform;
                 avr.anchorMin = avr.anchorMax = new Vector2(0.5f, 0.5f);
                 avr.pivot = new Vector2(0f, 0.5f);
+                avr.sizeDelta = new Vector2(labelW, 40f);
                 avr.anchoredPosition = new Vector2(startX, 0f);
 
                 // 手牌
-                var cardsX = startX + avatarSize + 6f;
+                var cardsX = startX + labelW + 6f;
                 for (var i = 0; i < _player.Count; i++)
                 {
                     var card = MakeCard(_playerHost, _player[i], false, 0.5f);

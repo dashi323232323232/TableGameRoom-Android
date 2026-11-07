@@ -32,7 +32,7 @@ namespace TableGameRoom.Mobile.UI
         public static RectTransform Create(
             Transform parent,
             string name,
-            string emoji,
+            AvatarVisual.Mood mood,
             int seatIndex,
             string status,
             int committed,
@@ -94,7 +94,9 @@ namespace TableGameRoom.Mobile.UI
             }
 
             // ---------- 左侧头像 ----------
-            var avatar = AvatarVisual.Create(root, name, emoji, seatIndex, false, AvatarSize);
+            // 表情由 MoodEngine 按真实牌局状态算出（牌力 / 压力 / 刚比牌的结果），
+            // 不是随机 emoji。
+            var avatar = AvatarVisual.Create(root, name, mood, seatIndex, false, AvatarSize);
             var ar = avatar;
             ar.anchorMin = ar.anchorMax = new Vector2(0f, 0.5f);
             ar.pivot = new Vector2(0f, 0.5f);
