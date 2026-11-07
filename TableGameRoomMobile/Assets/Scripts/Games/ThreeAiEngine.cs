@@ -291,5 +291,11 @@ namespace TableGameRoom.Mobile.Games
         /// 看牌是整局一次的决定，不能每轮重掷 —— 否则几轮下来全员都会看牌。
         /// </summary>
         public bool LookDecided { get; set; }
+
+        /// <summary>
+        /// 看牌后已经跟过几轮（用于 3 倍 / 2 倍规则）。
+        /// 和玩家侧的 _playerCallCount 同一套逻辑。
+        /// </summary>
+        public int CallCount { get; set; }
     }
 }

@@ -69,6 +69,9 @@ namespace TableGameRoom.Mobile.Games
         /// <summary>本局已经进行了多少轮（玩家每次跟/加算一轮）。</summary>
         private int _rounds;
 
+        /// <summary>AI 行动协程是否正在运行（防止连点导致重入）。</summary>
+        private bool _aiRunning;
+
         /// <summary>玩家看牌后已经跟过几轮（用于 3 倍 / 2 倍规则）。</summary>
         private int _playerCallCount;
 
@@ -464,8 +467,10 @@ namespace TableGameRoom.Mobile.Games
             _playerRaises++;
             _rounds++;
 
-            // 注额跟着涨，后续跟注按新注额算
-            _stake = Mathf.Max(_stake, cost / 2);
+            // 加注后全桌的「跟注额」都抬高到这一注。
+            // 之前只把 _stake 改成 cost/2，导致玩家加到 100、AI 还在按 50 跟 ——
+            // 等于 AI 用一半的钱跟了玩家的注，完全不对等。
+            _stake = Mathf.Max(_stake, cost);
 
             _log = $"你加注 ${cost:N0}。";
 
@@ -550,16 +555,20 @@ namespace TableGameRoom.Mobile.Games
         ///
         /// 每位 AI 有两套时间：
         ///   1. **行动倒计时**（30 秒，固定在头顶显示）：像真人坐在那儿，还有多少时间做决定。
-        ///   2. **真实思考时间**（3~25 秒，随压力增长）：到点才真正做决定。
+        ///   2. **真实思考时间**（3~30 秒，随压力增长）：到点才真正做决定。
         ///
         /// 流程：
         ///   思考 → 决定看牌 → 看完**重置思考时间**再想一轮 → 决定跟/加/弃
-        ///
-        /// 这样玩家看到的就是「对面先犹豫、翻牌看一眼、又想了半天才加注」，
-        /// 而不是一瞬间全员出结果。
         /// </summary>
         private void AiPlayOut()
         {
+            // 防重入：玩家连点会让多个协程同时跑，结果两个座位同时出现倒计时。
+            if (_aiRunning)
+            {
+                Debug.LogWarning("[Three] AiPlayOut 已在运行，忽略重复调用");
+                return;
+            }
+
             StartCoroutine(AiPlayOutRoutine());
         }
 
@@ -567,32 +576,38 @@ namespace TableGameRoom.Mobile.Games
         private const float TurnSeconds = 30f;
 
         /// <summary>
-        /// 真实思考时间：3~25 秒，压力越大越久。
-        /// 压力来自：轮次（越往后越紧张）+ 注额相对档位上限的比例 + 是否被加注。
-        /// </summary>
-        /// <summary>
-        /// 真实思考时间：3~30 秒，压力越大越久。
+        /// 真实思考时间 —— 前期快、后期慢，偶尔「灵机一动」秒出。
         ///
-        /// 上限取 30 是为了和行动倒计时对齐 —— 玩家看到的倒计时是 30 秒，
-        /// 真实思考不该比它还长，否则倒计时归零了人还在想，很怪。
+        /// 节奏设计（模拟真人）：
+        ///   · 前两轮：2~8 秒（正常人扫一眼就出手）
+        ///   · 中期：8~18 秒（注额变大，开始琢磨）
+        ///   · 后期：18~30 秒（压力大，反复权衡）
+        ///   · 任意阶段都有 15% 概率「灵机一动」：1~2 秒立刻决定
+        ///
+        /// 压力 = 轮次进度 60% + 注额相对档位上限 40%，被加注再 +0.15。
         /// </summary>
         private float RollThinkSeconds(int round, int stake, bool pressured)
         {
-            var roundPressure = Mathf.Clamp01(round / 6f);
+            // ---------- 灵机一动：偶尔秒出 ----------
+            if (UnityEngine.Random.value < 0.15f)
+                return UnityEngine.Random.Range(1f, 2f);
+
+            var roundPressure = Mathf.Clamp01(round / 5f);
             var stakePressure = _app.Tier.Max is int cap && cap > 0
                 ? Mathf.Clamp01((float)stake / cap)
                 : Mathf.Clamp01(Mathf.Log10(Mathf.Max(1, stake)) / 6f);
 
-            var pressure = roundPressure * 0.5f + stakePressure * 0.5f;
-            if (pressured) pressure = Mathf.Min(1f, pressure + 0.2f);
+            var pressure = roundPressure * 0.6f + stakePressure * 0.4f;
+            if (pressured) pressure = Mathf.Min(1f, pressure + 0.15f);
 
-            // 3 秒打底，最高 30 秒
-            var seconds = Mathf.Lerp(3f, 30f, pressure);
+            // 前两轮压到低段，越往后越慢（用平方曲线让前期更平）
+            var eased = pressure * pressure;
+            var seconds = Mathf.Lerp(2f, 30f, eased);
 
-            // ±25% 随机波动，避免节奏呆板
-            seconds *= UnityEngine.Random.Range(0.75f, 1.25f);
+            // ±20% 随机波动
+            seconds *= UnityEngine.Random.Range(0.8f, 1.2f);
 
-            return Mathf.Clamp(seconds, 3f, 30f);
+            return Mathf.Clamp(seconds, 2f, 30f);
         }
 
         /// <summary>
@@ -620,6 +635,31 @@ namespace TableGameRoom.Mobile.Games
         }
 
         private System.Collections.IEnumerator AiPlayOutRoutine()
+        {
+            _aiRunning = true;
+            _currentSeatName = "";
+
+            try
+            {
+                yield return AiPlayOutBody();
+            }
+            finally
+            {
+                // 无论正常结束还是中途 yield break，都要清干净：
+                // 所有座位的思考标记归零，避免倒计时残留在多个座位上。
+                _aiRunning = false;
+                foreach (var seat in _seats)
+                {
+                    seat.Thinking = false;
+                    seat.TurnLeft = 0f;
+                    seat.ThinkLeft = 0f;
+                }
+                _currentSeatName = "";
+                RefreshTable();
+            }
+        }
+
+        private System.Collections.IEnumerator AiPlayOutBody()
         {
             _currentSeatName = "";
 
@@ -689,11 +729,23 @@ namespace TableGameRoom.Mobile.Games
 
                 s.Profile.DecisionsUsed++;
 
+                // AI 跟注额和玩家同一套规则：
+                //   闷牌 1 倍、看牌首轮 3 倍、之后 2 倍
+                // 之前这里固定用 _stake，玩家加注到 100 后 AI 还按 50 跟，
+                // 等于用一半的钱跟注，完全不对等。
+                var seatCall = !s.Profile.Looked
+                    ? _stake
+                    : s.Profile.CallCount == 0 ? _stake * 3 : _stake * 2;
+
                 if (_ai.Raises(ctx, s.Profile))
                 {
-                    var cost = _stake * 2;
+                    var cost = seatCall * 2;
                     s.Committed += cost;
                     _pot += cost;
+
+                    // AI 加注也抬高全桌跟注额
+                    _stake = Mathf.Max(_stake, cost);
+
                     s.Status = "加注";
                     s.Emoji = "😄";
                     s.LastAction = $"加注 ${cost:N0}";
@@ -701,11 +753,12 @@ namespace TableGameRoom.Mobile.Games
                 }
                 else
                 {
-                    s.Committed += _stake;
-                    _pot += _stake;
+                    s.Committed += seatCall;
+                    _pot += seatCall;
+                    s.Profile.CallCount++;
                     s.Status = "跟注";
                     s.Emoji = "😐";
-                    s.LastAction = $"跟注 ${_stake:N0}";
+                    s.LastAction = $"跟注 ${seatCall:N0}";
                 }
 
                 RefreshTable();
